@@ -444,6 +444,7 @@
   .request-row .r-body{ flex:1; min-width:0; }
   .request-row .r-title{ font-size:14px; font-weight:600; }
   .request-row .r-sub{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .request-row .r-arrow{ width:14px; height:14px; color:var(--muted-2); flex:none; }
   .status-pill{ font-size:10.5px; font-weight:700; padding:5px 11px; border-radius:999px; text-transform:uppercase; letter-spacing:0.04em; flex:none; }
   .status-pill.received{ background:#EFE9DC; color:#8A8178; }
   .status-pill.progress{ background:#FBEBD3; color:#B8763A; }
@@ -956,7 +957,7 @@
         <div class="r-title">${p.title}</div>
         <div class="r-sub">Google Places</div>
       </div>
-      ${icon('arrow')}
+      ${icon('arrow', 'r-arrow')}
     `;
     return p.url
       ? `<a class="request-row" href="${p.url}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">${inner}</a>`
