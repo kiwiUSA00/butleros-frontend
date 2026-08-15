@@ -1924,16 +1924,17 @@
      state.weather stays null and the UI shows "Weather not connected yet"
      rather than a fabricated forecast. */
   /* The location every live widget (weather, destination guide, category
-     places) currently reflects. Priority: an explicit choice always wins
-     — the location switcher (exploreLocation), then the profile's saved
-     favorite location. Absent either, this falls back to the real city
-     detected from the visitor's own IP address (see detectIpLocation()),
-     and only falls back to a hardcoded default if that lookup hasn't
-     resolved yet or failed. */
+     places) currently reflects. Priority: a manual, in-the-moment choice
+     always wins (typing into the location switcher — exploreLocation).
+     Absent that, real IP-based geo-targeting drives the default — this is
+     what most visitors will actually see, based on where they are right
+     now. The profile's saved favorite location is only used as a fallback
+     if geo-detection hasn't resolved yet or failed, and a hardcoded
+     default is the last resort if everything else comes up empty. */
   function currentLocation(){
     return state.exploreLocation
-      || (state.profile.favoriteLocations && state.profile.favoriteLocations[0])
       || state.ipLocation.city
+      || (state.profile.favoriteLocations && state.profile.favoriteLocations[0])
       || 'Austin';
   }
 
