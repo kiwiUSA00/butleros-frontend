@@ -295,6 +295,48 @@
       repeating-radial-gradient(circle at 75% 30%, transparent 0, transparent 34px, rgba(255,255,255,0.10) 35px);
   }
 
+  /* ---------- home spotlight (live, rotating) ---------- */
+  .spotlight{
+    position:relative;
+    min-height:280px;
+    border-radius:20px;
+    overflow:hidden;
+    background-color:var(--gold-softer);
+    background-size:cover;
+    background-position:center;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:20px;
+    padding:26px 28px;
+    margin-bottom:34px;
+    color:#fff;
+    transition:background-image .3s ease;
+  }
+  .spotlight.spotlight-empty{ min-height:auto; background:var(--surface); border:1px solid var(--line); color:var(--muted-2); align-items:center; justify-content:center; }
+  .spotlight-inner{ max-width:480px; position:relative; z-index:2; }
+  .spotlight .badge{
+    display:inline-block; background:rgba(255,255,255,0.92); color:var(--ink);
+    font-size:9.5px; font-weight:700; letter-spacing:0.08em; padding:4px 9px; border-radius:6px; margin-bottom:10px;
+  }
+  .spotlight-inner h3{ font-family:'Fraunces', serif; font-weight:500; font-size:26px; margin:0 0 6px; line-height:1.2; }
+  .spotlight-rating{ display:flex; align-items:center; gap:4px; font-size:13px; font-weight:600; margin-bottom:8px; }
+  .spotlight-rating svg{ width:12px; height:12px; color:var(--gold); }
+  .spotlight-rating span{ opacity:0.75; font-weight:500; }
+  .spotlight-inner p{ font-size:13.5px; opacity:0.9; line-height:1.5; margin:0 0 16px; }
+  .spotlight-nav{ position:relative; z-index:2; display:flex; flex-direction:column; align-items:center; gap:12px; flex:none; }
+  .sp-arrow{
+    width:34px; height:34px; border-radius:50%; border:1px solid rgba(255,255,255,0.5);
+    background:rgba(255,255,255,0.12); color:#fff; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; backdrop-filter:blur(4px);
+  }
+  .sp-arrow svg{ width:14px; height:14px; }
+  .sp-prev svg{ transform:rotate(180deg); }
+  .spotlight-dots{ display:flex; flex-direction:column; gap:6px; }
+  .sp-dot{ width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.4); cursor:pointer; transition:background .15s ease, transform .15s ease; }
+  .sp-dot.active{ background:#fff; transform:scale(1.3); }
+  @media (max-width:760px){ .spotlight{ flex-direction:column; align-items:flex-start; } .spotlight-nav{ flex-direction:row; } .spotlight-dots{ flex-direction:row; } }
+
   /* ---------- curated grid ---------- */
   .section{ margin-bottom:34px; }
   .section-head{
@@ -455,6 +497,19 @@
   }
   .chip:hover{ border-color:var(--gold); color:var(--ink); }
   .chip.active{ background:var(--ink); border-color:var(--ink); color:#fff; }
+
+  /* Free-text category search + sort — sits below the refine chips. */
+  .category-search-row{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+  .cat-search-input{
+    flex:1; min-width:200px; padding:9px 14px; border:1px solid var(--line); border-radius:999px;
+    font-size:13px; font-family:inherit; outline:none; background:var(--surface);
+  }
+  .cat-search-input:focus{ border-color:var(--gold); }
+  .cat-search-btn{ padding:9px 16px; font-size:12.5px; }
+  .cat-sort-select{
+    padding:9px 14px; border:1px solid var(--line); border-radius:999px; background:var(--surface);
+    font-size:12.5px; font-family:inherit; color:var(--muted); cursor:pointer; outline:none;
+  }
 
   /* Live place cards — real photo, rating, and description per result. */
   .place-grid{
@@ -738,8 +793,12 @@
     destinationGuideLoading: false,
     exploreLocation: null, // set to profile's favorite location once loaded; user can switch it live per category page
     categoryPlaces: {}, // { [navKey]: { live, items, loading, loadingMore, location, query, nextPageToken } } — populated from /butler/places (Google Places)
-    categoryFilter: {}, // { [navKey]: selectedQueryString } — which refine chip is active per category
+    categoryFilter: {}, // { [navKey]: selectedQueryString } — which refine chip (or custom search) is active per category
+    categorySort: {}, // { [navKey]: 'relevance' | 'rating' } — client-side display sort over whatever's loaded
+    homeSpotlight: { live: false, items: [], loading: false, location: null }, // real top-rated picks across all categories, for the rotating home hero spotlight
+    spotlightIndex: 0,
   };
+  let spotlightTimer = null; // rotation interval handle — module-level since it's not render state
 
   const NAV = [
     { key:'home', label:'Home', icon:'home' },
@@ -816,6 +875,7 @@
     if(page === 'finance') loadFinance();
     if(page === 'travel') loadDestinationGuide();
     if(CATEGORY_FILTERS[page]) loadCategoryPlaces(page);
+    if(page === 'home') loadHomeSpotlight(); else stopSpotlightRotation();
   }
 
   /* ============ GREETING ============ */
@@ -900,6 +960,8 @@
         </div>
       </section>
 
+      ${spotlightCarousel()}
+
       <section class="section">
         <div class="section-head">
           <span class="label">Curated For You</span>
@@ -928,15 +990,7 @@
 
         <div class="panel">
           <div class="panel-head"><h3>Your Butler's Picks</h3></div>
-          ${state.picks.length ? state.picks.map(p => `
-            <div class="pick-item" data-pick>
-              <div class="pick-thumb" style="background:linear-gradient(160deg, ${p.grad[0]}, ${p.grad[1]})"></div>
-              <div>
-                <div class="pick-title">${p.title}</div>
-                <div class="pick-sub">${p.sub}</div>
-              </div>
-            </div>
-          `).join('') : `<div class="empty-state">No picks yet.</div>`}
+          ${butlerPicksList()}
           <button class="footer-link" data-nav="lifestyle">See All Recommendations ${icon('arrow')}</button>
         </div>
 
@@ -946,6 +1000,134 @@
             <p>Artful living is about how you experience them.</p>
           </div>
           <button id="journalBtn">Explore Journal ${icon('arrow')}</button>
+        </div>
+      </section>
+    `;
+  }
+
+  /* "Your Butler's Picks" — no dedicated live picks endpoint exists yet,
+     so this repurposes the same real, live spotlight data (top-rated
+     places across every category) into a short list instead of sitting
+     permanently empty. Falls back honestly to an empty state if nothing
+     live has loaded yet. */
+  function butlerPicksList(){
+    const s = state.homeSpotlight;
+    if(s && s.live && s.items.length){
+      return s.items.slice(0, 4).map(p => `
+        <div class="pick-item" data-pick>
+          <div class="pick-thumb" style="${p.photoName ? `background-image:url('${API_BASE}/butler/photo?name=${encodeURIComponent(p.photoName)}&w=140');background-size:cover;background-position:center;` : `background:linear-gradient(160deg, var(--gold-soft), var(--gold));`}"></div>
+          <div>
+            <div class="pick-title">${p.title}</div>
+            <div class="pick-sub">${p.rating ? `★ ${p.rating.toFixed(1)} · ` : ''}${p.address || p.description || ''}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+    if(state.picks.length){
+      return state.picks.map(p => `
+        <div class="pick-item" data-pick>
+          <div class="pick-thumb" style="background:linear-gradient(160deg, ${p.grad[0]}, ${p.grad[1]})"></div>
+          <div>
+            <div class="pick-title">${p.title}</div>
+            <div class="pick-sub">${p.sub}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+    return `<div class="empty-state">${s && s.loading ? 'Finding live picks…' : 'No picks yet.'}</div>`;
+  }
+
+  /* ============ HOME SPOTLIGHT (live, rotating) ============
+     Pulls the default query for every category (Lifestyle/Travel/Dining/
+     Wellness) from /butler/places, merges the real results, and surfaces
+     the highest-rated, best-photographed ones as an auto-rotating hero
+     spotlight — genuinely different places each time it refreshes, never
+     invented copy. */
+  async function loadHomeSpotlight(){
+    const location = currentLocation();
+    const existing = state.homeSpotlight;
+    if(existing && existing.location === location && existing.live){ startSpotlightRotation(); return; }
+    state.homeSpotlight = Object.assign({}, existing, { loading: true, location });
+    if(state.page === 'home') renderPage();
+    try{
+      const navKeys = Object.keys(CATEGORY_FILTERS);
+      const results = await Promise.all(navKeys.map(navKey => {
+        const q = CATEGORY_FILTERS[navKey][0].query;
+        return apiGet('/butler/places?query=' + encodeURIComponent(q) + '&location=' + encodeURIComponent(location))
+          .catch(() => ({ live: false, items: [] }));
+      }));
+      let merged = [];
+      results.forEach((r, i) => {
+        if(r.live){
+          (r.items || []).slice(0, 6).forEach(item => merged.push(Object.assign({ categoryKey: navKeys[i] }, item)));
+        }
+      });
+      merged.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      const withPhotos = merged.filter(m => m.photoName);
+      const withoutPhotos = merged.filter(m => !m.photoName);
+      const items = withPhotos.concat(withoutPhotos).slice(0, 10);
+      const live = items.length > 0;
+      state.homeSpotlight = { live, items, loading: false, location };
+      state.spotlightIndex = 0;
+      if(live) state.live = true;
+    }catch(err){
+      state.homeSpotlight = Object.assign({}, state.homeSpotlight, { loading: false });
+    }finally{
+      if(state.page === 'home') renderPage();
+      startSpotlightRotation();
+    }
+  }
+
+  function startSpotlightRotation(){
+    stopSpotlightRotation();
+    const s = state.homeSpotlight;
+    if(!s || !s.live || s.items.length < 2) return;
+    spotlightTimer = setInterval(() => {
+      if(state.page !== 'home'){ stopSpotlightRotation(); return; }
+      state.spotlightIndex = (state.spotlightIndex + 1) % state.homeSpotlight.items.length;
+      renderPage();
+    }, 5500);
+  }
+  function stopSpotlightRotation(){
+    if(spotlightTimer){ clearInterval(spotlightTimer); spotlightTimer = null; }
+  }
+  function spotlightGoTo(idx){
+    const s = state.homeSpotlight;
+    if(!s || !s.items.length) return;
+    state.spotlightIndex = ((idx % s.items.length) + s.items.length) % s.items.length;
+    renderPage();
+    startSpotlightRotation();
+  }
+  function spotlightNext(){ spotlightGoTo(state.spotlightIndex + 1); }
+  function spotlightPrev(){ spotlightGoTo(state.spotlightIndex - 1); }
+
+  const SPOTLIGHT_CATEGORY_LABEL = { lifestyle: 'Lifestyle', travel: 'Travel', dining: 'Dining', wellness: 'Wellness' };
+
+  function spotlightCarousel(){
+    const s = state.homeSpotlight;
+    if(s && s.loading && !s.items.length){
+      return `<section class="spotlight spotlight-empty"><div class="loading-state">Finding today's live spotlight...</div></section>`;
+    }
+    if(!s || !s.live || !s.items.length) return '';
+    const i = state.spotlightIndex % s.items.length;
+    const p = s.items[i];
+    const img = p.photoName ? `${API_BASE}/butler/photo?name=${encodeURIComponent(p.photoName)}&w=1200` : '';
+    const catLabel = SPOTLIGHT_CATEGORY_LABEL[p.categoryKey] || 'Live Pick';
+    return `
+      <section class="spotlight"${img ? ` style="background-image:linear-gradient(180deg, rgba(20,16,10,0.05) 40%, rgba(20,16,10,0.82)), url('${img}')"` : ''}>
+        <div class="spotlight-inner">
+          <span class="badge">${catLabel.toUpperCase()} · LIVE</span>
+          <h3>${p.title}</h3>
+          ${p.rating ? `<div class="spotlight-rating">${icon('star', 'sp-star')} ${p.rating.toFixed(1)}${p.userRatingCount ? ` <span>(${p.userRatingCount})</span>` : ''}</div>` : ''}
+          ${p.description || p.address ? `<p>${p.description || p.address}</p>` : ''}
+          ${p.url ? `<a class="btn-primary" href="${p.url}" target="_blank" rel="noopener">View ${icon('arrow')}</a>` : ''}
+        </div>
+        <div class="spotlight-nav">
+          <button class="sp-arrow sp-prev" id="spotlightPrev" aria-label="Previous">${icon('arrow')}</button>
+          <div class="spotlight-dots">
+            ${s.items.map((_, idx) => `<span class="sp-dot ${idx===i?'active':''}" data-spotlight-dot="${idx}"></span>`).join('')}
+          </div>
+          <button class="sp-arrow sp-next" id="spotlightNext" aria-label="Next">${icon('arrow')}</button>
         </div>
       </section>
     `;
@@ -998,11 +1180,24 @@
     const filters = CATEGORY_FILTERS[navKey];
     if(!filters) return '';
     const selectedQuery = state.categoryFilter[navKey] || filters[0].query;
+    const isCustomQuery = !filters.some(f => f.query === selectedQuery);
     const data = state.categoryPlaces[navKey];
+    const sort = state.categorySort[navKey] || 'relevance';
 
     const chips = `
       <div class="filter-chips">
-        ${filters.map(f => `<button class="chip ${f.query===selectedQuery?'active':''}" data-filter-cat="${navKey}" data-filter-query="${f.query}">${f.label}</button>`).join('')}
+        ${filters.map(f => `<button class="chip ${!isCustomQuery && f.query===selectedQuery?'active':''}" data-filter-cat="${navKey}" data-filter-query="${f.query}">${f.label}</button>`).join('')}
+      </div>
+    `;
+
+    const searchRow = `
+      <div class="category-search-row">
+        <input type="text" class="cat-search-input" placeholder="Search ${title.toLowerCase()} — e.g. rooftop bars, vegan, live music..." value="${isCustomQuery ? selectedQuery : ''}" data-search-input-cat="${navKey}" />
+        <button class="btn-ghost cat-search-btn" data-search-btn-cat="${navKey}">Search</button>
+        <select class="cat-sort-select" data-sort-cat="${navKey}">
+          <option value="relevance" ${sort!=='rating'?'selected':''}>Sort: Relevance</option>
+          <option value="rating" ${sort==='rating'?'selected':''}>Sort: Highest Rated</option>
+        </select>
       </div>
     `;
 
@@ -1012,9 +1207,10 @@
     } else if(!data || !data.live || !data.items.length){
       body = `<div class="empty-state">No live results yet for ${currentLocation()}.</div>`;
     } else {
+      const items = sort === 'rating' ? [...data.items].sort((a,b) => (b.rating||0) - (a.rating||0)) : data.items;
       body = `
         <div class="place-grid">
-          ${data.items.map(placeCard).join('')}
+          ${items.map(placeCard).join('')}
         </div>
         ${data.nextPageToken ? `
           <button class="btn-ghost load-more-btn" data-loadmore-cat="${navKey}" data-loadmore-token="${data.nextPageToken}" ${data.loadingMore ? 'disabled' : ''} style="margin:18px auto 4px;display:block;">
@@ -1031,6 +1227,7 @@
           ${data && data.live && data.items.length ? '<span class="conn-pill live" style="margin-left:8px;">Live · Google Places</span>' : ''}
         </div>
         ${chips}
+        ${searchRow}
         ${body}
       </div>
     `;
@@ -1327,6 +1524,27 @@
       el.addEventListener('click', () => loadCategoryPlaces(el.dataset.loadmoreCat, { pageToken: el.dataset.loadmoreToken }));
     });
 
+    root.querySelectorAll('[data-search-input-cat]').forEach(input => {
+      input.addEventListener('keydown', e => { if(e.key === 'Enter') setCategorySearch(input.dataset.searchInputCat, input.value); });
+    });
+    root.querySelectorAll('[data-search-btn-cat]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const input = root.querySelector(`[data-search-input-cat="${btn.dataset.searchBtnCat}"]`);
+        setCategorySearch(btn.dataset.searchBtnCat, input ? input.value : '');
+      });
+    });
+    root.querySelectorAll('[data-sort-cat]').forEach(sel => {
+      sel.addEventListener('change', () => setCategorySort(sel.dataset.sortCat, sel.value));
+    });
+
+    const spotlightPrevBtn = document.getElementById('spotlightPrev');
+    const spotlightNextBtn = document.getElementById('spotlightNext');
+    if(spotlightPrevBtn) spotlightPrevBtn.addEventListener('click', () => spotlightPrev());
+    if(spotlightNextBtn) spotlightNextBtn.addEventListener('click', () => spotlightNext());
+    root.querySelectorAll('[data-spotlight-dot]').forEach(el => {
+      el.addEventListener('click', () => spotlightGoTo(parseInt(el.dataset.spotlightDot, 10)));
+    });
+
     const chatSend = document.getElementById('chatSend');
     const chatInput = document.getElementById('chatInput');
     if(chatSend){
@@ -1527,13 +1745,17 @@
       if(opts.pageToken) url += '&pageToken=' + encodeURIComponent(opts.pageToken);
       const data = await apiGet(url);
       const priorItems = loadingMore ? (state.categoryPlaces[navKey].items || []) : [];
+      const items = priorItems.concat(data.items || []);
+      // A failed "load more" call should never wipe results that already
+      // loaded successfully — only treat this as empty if we truly have
+      // nothing to show.
       state.categoryPlaces[navKey] = {
-        live: data.live,
-        items: priorItems.concat(data.items || []),
+        live: data.live || items.length > 0,
+        items,
         loading: false,
         loadingMore: false,
         location, query,
-        nextPageToken: data.nextPageToken || null,
+        nextPageToken: data.live ? (data.nextPageToken || null) : (loadingMore ? existing.nextPageToken : null),
       };
       if(data.live) state.live = true;
     }catch(err){
@@ -1541,6 +1763,23 @@
     }finally{
       if(state.page === navKey) renderPage();
     }
+  }
+
+  /* Called from the free-text search box on a category page — treats
+     whatever the user typed as a real live query (not limited to the
+     preset refine chips), reloading from scratch. */
+  function setCategorySearch(navKey, text){
+    const trimmed = (text || '').trim();
+    if(!trimmed) return;
+    state.categoryFilter[navKey] = trimmed;
+    loadCategoryPlaces(navKey, { reset: true });
+  }
+
+  /* Purely a display-order change over whatever's already loaded — no
+     new fetch needed. */
+  function setCategorySort(navKey, mode){
+    state.categorySort[navKey] = mode;
+    renderPage();
   }
 
   /* Called when a refine chip is clicked on a category page — switches
@@ -1690,7 +1929,7 @@
   // loadUser first (it may update the favorite-location weather should use),
   // then everything else in parallel.
   loadUser().then(() => {
-    Promise.allSettled([ loadCalendar(), loadButlerRun(), loadWeather() ]).then(() => {
+    Promise.allSettled([ loadCalendar(), loadButlerRun(), loadWeather(), loadHomeSpotlight() ]).then(() => {
       renderGreeting();
       if(['home','profile','calendar'].includes(state.page)) renderPage();
     });
