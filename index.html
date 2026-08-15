@@ -445,6 +445,40 @@
   .request-row .r-title{ font-size:14px; font-weight:600; }
   .request-row .r-sub{ font-size:12px; color:var(--muted); margin-top:2px; }
   .request-row .r-arrow{ width:14px; height:14px; color:var(--muted-2); flex:none; }
+
+  /* Refine chips — sub-category filters within a major category page. */
+  .filter-chips{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+  .chip{
+    background:var(--cream); border:1px solid var(--line); border-radius:999px;
+    padding:8px 15px; font-size:12.5px; font-weight:600; color:var(--muted);
+    cursor:pointer; font-family:inherit; transition:background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .chip:hover{ border-color:var(--gold); color:var(--ink); }
+  .chip.active{ background:var(--ink); border-color:var(--ink); color:#fff; }
+
+  /* Live place cards — real photo, rating, and description per result. */
+  .place-grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:16px;
+  }
+  .place-card{
+    display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
+    border-radius:14px; overflow:hidden; text-decoration:none; color:inherit;
+    box-shadow:var(--shadow-sm); transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .place-card:hover{ transform:translateY(-3px); box-shadow:var(--shadow-md); }
+  .pc-media{
+    width:100%; aspect-ratio:4/3; background-color:var(--gold-softer); background-size:cover; background-position:center;
+    display:flex; align-items:center; justify-content:center; flex:none;
+  }
+  .pc-fallback{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
+  .pc-fallback svg{ width:28px; height:28px; color:var(--gold); }
+  .pc-body{ padding:13px 15px 16px; flex:1; display:flex; flex-direction:column; gap:5px; }
+  .pc-title{ font-size:14px; font-weight:600; line-height:1.3; }
+  .pc-rating{ display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--gold); }
+  .pc-rating svg{ width:12px; height:12px; }
+  .pc-count{ color:var(--muted-2); font-weight:500; }
+  .pc-desc{ margin:2px 0 0; font-size:12.5px; color:var(--muted); line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .load-more-btn:disabled{ opacity:0.6; cursor:default; }
   .status-pill{ font-size:10.5px; font-weight:700; padding:5px 11px; border-radius:999px; text-transform:uppercase; letter-spacing:0.04em; flex:none; }
   .status-pill.received{ background:#EFE9DC; color:#8A8178; }
   .status-pill.progress{ background:#FBEBD3; color:#B8763A; }
@@ -675,6 +709,7 @@
     plus:'<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
     sparkle:'<path d="M12 3l1.8 4.9L19 9.5l-4.9 1.8L12 16l-1.8-4.9L5 9.5l4.9-1.8L12 3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
     wallet:'<rect x="3" y="6.5" width="18" height="12.5" rx="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M3 10.5h18" stroke="currentColor" stroke-width="1.5"/><circle cx="16.5" cy="14.5" r="1.1" fill="currentColor" stroke="none"/>',
+    star:'<path d="M12 3.5l2.6 5.4 5.9.7-4.3 4.1 1.1 5.8L12 16.7l-5.3 2.8 1.1-5.8-4.3-4.1 5.9-.7L12 3.5z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linejoin="round"/>',
   };
   function icon(name, cls){ return `<svg class="${cls||''}" viewBox="0 0 24 24" fill="none">${ICONS[name]||''}</svg>`; }
 
@@ -702,7 +737,8 @@
     destinationGuide: null, // populated from /butler/destination-guide (Wikivoyage) — null until loaded
     destinationGuideLoading: false,
     exploreLocation: null, // set to profile's favorite location once loaded; user can switch it live per category page
-    categoryPlaces: {}, // { [navKey]: { live, items, loading, location } } — populated from /butler/places (Google Places)
+    categoryPlaces: {}, // { [navKey]: { live, items, loading, loadingMore, location, query, nextPageToken } } — populated from /butler/places (Google Places)
+    categoryFilter: {}, // { [navKey]: selectedQueryString } — which refine chip is active per category
   };
 
   const NAV = [
@@ -719,12 +755,34 @@
   ];
 
   // What each category page searches for via GET /butler/places (real
-  // Google Places text search) — one real, distinct query per category.
-  const CATEGORY_QUERY = {
-    lifestyle: 'boutiques and galleries',
-    travel: 'top attractions',
-    dining: 'best restaurants',
-    wellness: 'spas and wellness centers',
+  // Google Places text search). Each category offers several real refine
+  // chips a user can switch between — the first entry is the default
+  // query shown when the page first loads.
+  const CATEGORY_FILTERS = {
+    lifestyle: [
+      { label: 'Boutiques & Galleries', query: 'boutiques and galleries' },
+      { label: 'Shopping', query: 'shopping districts' },
+      { label: 'Nightlife', query: 'nightlife' },
+      { label: 'Arts & Culture', query: 'arts and culture venues' },
+    ],
+    travel: [
+      { label: 'Top Attractions', query: 'top attractions' },
+      { label: 'Museums', query: 'museums' },
+      { label: 'Parks & Nature', query: 'parks and nature' },
+      { label: 'Tours & Activities', query: 'tours and activities' },
+    ],
+    dining: [
+      { label: 'Best Restaurants', query: 'best restaurants' },
+      { label: 'Cafes & Coffee', query: 'cafes and coffee shops' },
+      { label: 'Bars & Nightlife', query: 'bars and nightlife' },
+      { label: 'Bakeries & Dessert', query: 'bakeries and dessert' },
+    ],
+    wellness: [
+      { label: 'Spas & Wellness', query: 'spas and wellness centers' },
+      { label: 'Yoga & Fitness', query: 'yoga and fitness studios' },
+      { label: 'Salons', query: 'hair and beauty salons' },
+      { label: 'Wellness Retreats', query: 'wellness retreats' },
+    ],
   };
 
   /* ============ TOAST ============ */
@@ -757,7 +815,7 @@
     renderPage();
     if(page === 'finance') loadFinance();
     if(page === 'travel') loadDestinationGuide();
-    if(CATEGORY_QUERY[page]) loadCategoryPlaces(page);
+    if(CATEGORY_FILTERS[page]) loadCategoryPlaces(page);
   }
 
   /* ============ GREETING ============ */
@@ -931,37 +989,77 @@
   }
 
   /* Real Google Places results for this category (via /butler/places) —
-     a different, live query per category (see CATEGORY_QUERY). */
+     a different, live query per category, refined further by whichever
+     filter chip is active (see CATEGORY_FILTERS). Renders as a visual
+     card grid (real photo, rating, description) with a "Load more"
+     button that pages through further real results instead of capping
+     at a handful of items. */
   function categoryPlacesPanel(navKey, title){
-    const query = CATEGORY_QUERY[navKey];
-    if(!query) return '';
+    const filters = CATEGORY_FILTERS[navKey];
+    if(!filters) return '';
+    const selectedQuery = state.categoryFilter[navKey] || filters[0].query;
     const data = state.categoryPlaces[navKey];
+
+    const chips = `
+      <div class="filter-chips">
+        ${filters.map(f => `<button class="chip ${f.query===selectedQuery?'active':''}" data-filter-cat="${navKey}" data-filter-query="${f.query}">${f.label}</button>`).join('')}
+      </div>
+    `;
+
+    let body;
     if(data && data.loading){
-      return `<div class="panel" style="margin-bottom:20px;"><div class="loading-state">Finding live ${title.toLowerCase()} nearby...</div></div>`;
+      body = `<div class="loading-state">Finding live ${title.toLowerCase()} nearby...</div>`;
+    } else if(!data || !data.live || !data.items.length){
+      body = `<div class="empty-state">No live results yet for ${currentLocation()}.</div>`;
+    } else {
+      body = `
+        <div class="place-grid">
+          ${data.items.map(placeCard).join('')}
+        </div>
+        ${data.nextPageToken ? `
+          <button class="btn-ghost load-more-btn" data-loadmore-cat="${navKey}" data-loadmore-token="${data.nextPageToken}" ${data.loadingMore ? 'disabled' : ''} style="margin:18px auto 4px;display:block;">
+            ${data.loadingMore ? 'Loading more…' : 'Load more'}
+          </button>
+        ` : ''}
+      `;
     }
-    if(!data || !data.live || !data.items.length){
-      return `<div class="panel" style="margin-bottom:20px;"><div class="panel-head"><h3>Nearby, Live</h3></div><div class="empty-state">No live results yet for ${currentLocation()}.</div></div>`;
-    }
+
     return `
-      <div class="panel" style="margin-bottom:20px;">
-        <div class="panel-head"><h3>Nearby, Live</h3><span class="conn-pill live" style="margin-left:8px;">Live · Google Places</span></div>
-        ${data.items.map(placeRow).join('')}
+      <div class="panel places-panel" style="margin-bottom:20px;">
+        <div class="panel-head">
+          <h3>Nearby, Live</h3>
+          ${data && data.live && data.items.length ? '<span class="conn-pill live" style="margin-left:8px;">Live · Google Places</span>' : ''}
+        </div>
+        ${chips}
+        ${body}
       </div>
     `;
   }
 
-  function placeRow(p){
+  /* A single real result, shown as an image card: a real photo (streamed
+     through our backend at /butler/photo so the API key never reaches the
+     browser), rating, and a genuine description or address pulled straight
+     from Google Places — never fabricated copy. Falls back to a plain
+     icon tile if Google has no photo for this place. */
+  function placeCard(p){
+    const img = p.photoName ? `${API_BASE}/butler/photo?name=${encodeURIComponent(p.photoName)}&w=500` : '';
+    const rating = p.rating ? `
+      <div class="pc-rating">${icon('star','pc-star')} ${p.rating.toFixed(1)}${p.userRatingCount ? `<span class="pc-count"> (${p.userRatingCount})</span>` : ''}</div>
+    ` : '';
+    const desc = p.description || p.address || '';
     const inner = `
-      <div class="r-icon">${icon('compass')}</div>
-      <div class="r-body">
-        <div class="r-title">${p.title}</div>
-        <div class="r-sub">Google Places</div>
+      <div class="pc-media"${img ? ` style="background-image:url('${img}')"` : ''}>
+        ${!img ? `<div class="pc-fallback">${icon('compass')}</div>` : ''}
       </div>
-      ${icon('arrow', 'r-arrow')}
+      <div class="pc-body">
+        <div class="pc-title">${p.title}</div>
+        ${rating}
+        ${desc ? `<p class="pc-desc">${desc}</p>` : ''}
+      </div>
     `;
     return p.url
-      ? `<a class="request-row" href="${p.url}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">${inner}</a>`
-      : `<div class="request-row">${inner}</div>`;
+      ? `<a class="place-card" href="${p.url}" target="_blank" rel="noopener">${inner}</a>`
+      : `<div class="place-card">${inner}</div>`;
   }
 
   /* Real destination-guide excerpt from Wikivoyage (via /butler/destination-guide).
@@ -1222,6 +1320,13 @@
       exploreLocationInput.addEventListener('keydown', e => { if(e.key === 'Enter') setExploreLocation(exploreLocationInput.value); });
     }
 
+    root.querySelectorAll('[data-filter-cat]').forEach(el => {
+      el.addEventListener('click', () => setCategoryFilter(el.dataset.filterCat, el.dataset.filterQuery));
+    });
+    root.querySelectorAll('[data-loadmore-cat]').forEach(el => {
+      el.addEventListener('click', () => loadCategoryPlaces(el.dataset.loadmoreCat, { pageToken: el.dataset.loadmoreToken }));
+    });
+
     const chatSend = document.getElementById('chatSend');
     const chatInput = document.getElementById('chatInput');
     if(chatSend){
@@ -1395,26 +1500,55 @@
 
   /* ============ CATEGORY PLACES (live) ============
      Hits GET /butler/places (real Google Places text search) with a
-     category-specific query, for whichever category page is open. Each
-     category gets genuinely different, live results — not the same feed
-     reused four times. */
-  async function loadCategoryPlaces(navKey){
+     category- and filter-specific query, for whichever category page is
+     open. Each category gets genuinely different, live results — not the
+     same feed reused four times — and `opts.pageToken` pages through
+     further real results ("Load more") instead of capping at a handful. */
+  async function loadCategoryPlaces(navKey, opts){
+    opts = opts || {};
+    const filters = CATEGORY_FILTERS[navKey];
+    if(!filters) return;
     const location = currentLocation();
-    const query = CATEGORY_QUERY[navKey];
-    if(!query) return;
+    const query = state.categoryFilter[navKey] || filters[0].query;
     const existing = state.categoryPlaces[navKey];
-    if(existing && existing.location === location && existing.live) return; // already have it
-    state.categoryPlaces[navKey] = Object.assign({}, existing, { loading: true, location });
+    const loadingMore = !!opts.pageToken;
+
+    if(!opts.reset && !loadingMore && existing && existing.location === location && existing.query === query && existing.live) return; // already have it
+
+    if(loadingMore){
+      state.categoryPlaces[navKey] = Object.assign({}, existing, { loadingMore: true });
+    } else {
+      state.categoryPlaces[navKey] = { live: false, items: [], loading: true, loadingMore: false, location, query, nextPageToken: null };
+    }
     if(state.page === navKey) renderPage();
+
     try{
-      const data = await apiGet('/butler/places?query=' + encodeURIComponent(query) + '&location=' + encodeURIComponent(location));
-      state.categoryPlaces[navKey] = { live: data.live, items: data.items || [], loading: false, location };
+      let url = '/butler/places?query=' + encodeURIComponent(query) + '&location=' + encodeURIComponent(location);
+      if(opts.pageToken) url += '&pageToken=' + encodeURIComponent(opts.pageToken);
+      const data = await apiGet(url);
+      const priorItems = loadingMore ? (state.categoryPlaces[navKey].items || []) : [];
+      state.categoryPlaces[navKey] = {
+        live: data.live,
+        items: priorItems.concat(data.items || []),
+        loading: false,
+        loadingMore: false,
+        location, query,
+        nextPageToken: data.nextPageToken || null,
+      };
       if(data.live) state.live = true;
     }catch(err){
-      state.categoryPlaces[navKey] = { live: false, items: [], loading: false, location };
+      state.categoryPlaces[navKey] = Object.assign({}, state.categoryPlaces[navKey], { loading: false, loadingMore: false });
     }finally{
       if(state.page === navKey) renderPage();
     }
+  }
+
+  /* Called when a refine chip is clicked on a category page — switches
+     the live query for that category and reloads real results from
+     scratch (fresh location, fresh pagination). */
+  function setCategoryFilter(navKey, query){
+    state.categoryFilter[navKey] = query;
+    loadCategoryPlaces(navKey, { reset: true });
   }
 
   /* Called from the location switcher on any category page. Clears
@@ -1431,7 +1565,7 @@
     renderPage();
     loadWeather();
     if(state.page === 'travel') loadDestinationGuide();
-    if(CATEGORY_QUERY[state.page]) loadCategoryPlaces(state.page);
+    if(CATEGORY_FILTERS[state.page]) loadCategoryPlaces(state.page, { reset: true });
   }
 
   /* ============ USER PROFILE (live) ============ */
