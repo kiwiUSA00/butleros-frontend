@@ -700,6 +700,8 @@
     weather: null, // populated from /butler/weather — null until a real call succeeds
     destinationGuide: null, // populated from /butler/destination-guide (Wikivoyage) — null until loaded
     destinationGuideLoading: false,
+    exploreLocation: null, // set to profile's favorite location once loaded; user can switch it live per category page
+    categoryPlaces: {}, // { [navKey]: { live, items, loading, location } } — populated from /butler/places (Google Places)
   };
 
   const NAV = [
@@ -714,6 +716,15 @@
     { key:'messages', label:'Messages', icon:'chat', badge:true },
     { key:'profile', label:'Profile', icon:'user' },
   ];
+
+  // What each category page searches for via GET /butler/places (real
+  // Google Places text search) — one real, distinct query per category.
+  const CATEGORY_QUERY = {
+    lifestyle: 'boutiques and galleries',
+    travel: 'top attractions',
+    dining: 'best restaurants',
+    wellness: 'spas and wellness centers',
+  };
 
   /* ============ TOAST ============ */
   function toast(msg, opts){
@@ -745,6 +756,7 @@
     renderPage();
     if(page === 'finance') loadFinance();
     if(page === 'travel') loadDestinationGuide();
+    if(CATEGORY_QUERY[page]) loadCategoryPlaces(page);
   }
 
   /* ============ GREETING ============ */
@@ -891,11 +903,64 @@
         <h2>${title}</h2>
         <p>${tagline}</p>
       </div>
+      ${locationSwitcher()}
       ${navKey === 'travel' ? destinationGuidePanel() : ''}
+      ${categoryPlacesPanel(navKey, title)}
+      <div class="section-head" style="margin-top:22px;">
+        <span class="label">Curated For You</span>
+      </div>
       <div class="curated-grid" id="curatedGrid">
         ${items.length ? items.map(curatedCard).join('') : `<div class="empty-state">Nothing curated here yet — make a request or check back once ButlerOS has run.</div>`}
       </div>
     `;
+  }
+
+  /* Lets the user switch which real location every live widget on this
+     page reflects (weather, destination guide, category places). Plain
+     text input + button — no fabricated autocomplete, just whatever the
+     backend's real APIs can resolve. */
+  function locationSwitcher(){
+    return `
+      <div class="location-switcher" style="display:flex;gap:8px;align-items:center;margin-bottom:18px;">
+        <input id="exploreLocationInput" type="text" placeholder="Explore a city..." value="${currentLocation()}" style="flex:1;max-width:280px;padding:9px 14px;border:1px solid var(--line);border-radius:999px;font-size:13.5px;font-family:inherit;" />
+        <button class="btn-ghost" id="exploreLocationBtn" style="padding:9px 16px;">Explore</button>
+        <span style="font-size:12px;color:var(--muted-2);">Showing live results for <strong>${currentLocation()}</strong></span>
+      </div>
+    `;
+  }
+
+  /* Real Google Places results for this category (via /butler/places) —
+     a different, live query per category (see CATEGORY_QUERY). */
+  function categoryPlacesPanel(navKey, title){
+    const query = CATEGORY_QUERY[navKey];
+    if(!query) return '';
+    const data = state.categoryPlaces[navKey];
+    if(data && data.loading){
+      return `<div class="panel" style="margin-bottom:20px;"><div class="loading-state">Finding live ${title.toLowerCase()} nearby...</div></div>`;
+    }
+    if(!data || !data.live || !data.items.length){
+      return `<div class="panel" style="margin-bottom:20px;"><div class="panel-head"><h3>Nearby, Live</h3></div><div class="empty-state">No live results yet for ${currentLocation()}.</div></div>`;
+    }
+    return `
+      <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-head"><h3>Nearby, Live</h3><span class="conn-pill live" style="margin-left:8px;">Live · Google Places</span></div>
+        ${data.items.map(placeRow).join('')}
+      </div>
+    `;
+  }
+
+  function placeRow(p){
+    const inner = `
+      <div class="r-icon">${icon('compass')}</div>
+      <div class="r-body">
+        <div class="r-title">${p.title}</div>
+        <div class="r-sub">Google Places</div>
+      </div>
+      ${icon('arrow')}
+    `;
+    return p.url
+      ? `<a class="request-row" href="${p.url}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">${inner}</a>`
+      : `<div class="request-row">${inner}</div>`;
   }
 
   /* Real destination-guide excerpt from Wikivoyage (via /butler/destination-guide).
@@ -1149,6 +1214,13 @@
     const retryFinance = document.getElementById('retryFinance');
     if(retryFinance) retryFinance.addEventListener('click', () => loadFinance());
 
+    const exploreLocationBtn = document.getElementById('exploreLocationBtn');
+    const exploreLocationInput = document.getElementById('exploreLocationInput');
+    if(exploreLocationBtn && exploreLocationInput){
+      exploreLocationBtn.addEventListener('click', () => setExploreLocation(exploreLocationInput.value));
+      exploreLocationInput.addEventListener('keydown', e => { if(e.key === 'Enter') setExploreLocation(exploreLocationInput.value); });
+    }
+
     const chatSend = document.getElementById('chatSend');
     const chatInput = document.getElementById('chatInput');
     if(chatSend){
@@ -1275,17 +1347,27 @@
      `live` flag tells us whether a real call actually succeeded — if not,
      state.weather stays null and the UI shows "Weather not connected yet"
      rather than a fabricated forecast. */
+  /* The location every live widget (weather, destination guide, category
+     places) currently reflects. Defaults to the profile's favorite
+     location once loaded, but the user can switch it live via the search
+     box on any category page — see setExploreLocation(). */
+  function currentLocation(){
+    return state.exploreLocation || (state.profile.favoriteLocations && state.profile.favoriteLocations[0]) || 'Austin';
+  }
+
   async function loadWeather(){
-    const location = (state.profile.favoriteLocations && state.profile.favoriteLocations[0]) || 'Austin';
+    const location = currentLocation();
     try{
       const data = await apiGet('/butler/weather?location=' + encodeURIComponent(location));
       if(data.live){
         state.weather = { location, tempF: data.tempF, conditions: data.conditions, live: true };
         state.live = true;
+      } else if(state.weather && state.weather.location !== location){
+        state.weather = null; // stale location's data — don't keep showing it as if it were current
       }
       if(state.page === 'home') renderPage();
     }catch(err){
-      // Backend unreachable — state.weather stays null.
+      // Backend unreachable — state.weather stays whatever it was.
     }
   }
 
@@ -1294,8 +1376,8 @@
      article excerpt server-side — no API key required on either end.
      Shown on the Travel page. */
   async function loadDestinationGuide(){
-    const location = (state.profile.favoriteLocations && state.profile.favoriteLocations[0]) || 'Austin';
-    if(state.destinationGuide && state.destinationGuide.location === location) return; // already have it
+    const location = currentLocation();
+    if(state.destinationGuide && state.destinationGuide.location === location && state.destinationGuide.live) return; // already have it
     state.destinationGuideLoading = true;
     if(state.page === 'travel') renderPage();
     try{
@@ -1308,6 +1390,47 @@
       state.destinationGuideLoading = false;
       if(state.page === 'travel') renderPage();
     }
+  }
+
+  /* ============ CATEGORY PLACES (live) ============
+     Hits GET /butler/places (real Google Places text search) with a
+     category-specific query, for whichever category page is open. Each
+     category gets genuinely different, live results — not the same feed
+     reused four times. */
+  async function loadCategoryPlaces(navKey){
+    const location = currentLocation();
+    const query = CATEGORY_QUERY[navKey];
+    if(!query) return;
+    const existing = state.categoryPlaces[navKey];
+    if(existing && existing.location === location && existing.live) return; // already have it
+    state.categoryPlaces[navKey] = Object.assign({}, existing, { loading: true, location });
+    if(state.page === navKey) renderPage();
+    try{
+      const data = await apiGet('/butler/places?query=' + encodeURIComponent(query) + '&location=' + encodeURIComponent(location));
+      state.categoryPlaces[navKey] = { live: data.live, items: data.items || [], loading: false, location };
+      if(data.live) state.live = true;
+    }catch(err){
+      state.categoryPlaces[navKey] = { live: false, items: [], loading: false, location };
+    }finally{
+      if(state.page === navKey) renderPage();
+    }
+  }
+
+  /* Called from the location switcher on any category page. Clears
+     cached live data tied to the old location and reloads everything
+     for the new one — weather, destination guide (if on Travel), and
+     this category's places. */
+  function setExploreLocation(newLocation){
+    const trimmed = (newLocation || '').trim();
+    if(!trimmed) return;
+    state.exploreLocation = trimmed;
+    state.weather = null;
+    state.destinationGuide = null;
+    state.categoryPlaces = {};
+    renderPage();
+    loadWeather();
+    if(state.page === 'travel') loadDestinationGuide();
+    if(CATEGORY_QUERY[state.page]) loadCategoryPlaces(state.page);
   }
 
   /* ============ USER PROFILE (live) ============ */
