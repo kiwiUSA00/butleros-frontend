@@ -827,6 +827,7 @@
     detailReturnPage: 'home', // where the Back button on the detail page goes
     detailMap: { loading: false, lat: null, lon: null, live: false }, // real coordinates for the embedded map, via /butler/geocode
     detailBookingRequestId: null, // set once "Book Now" is clicked on the detail page, so its timeline can track the real request's live status
+    ipLocation: { city: null, loading: false, resolved: false }, // real city detected from the visitor's own IP address — see detectIpLocation()
   };
   let spotlightTimer = null; // rotation interval handle — module-level since it's not render state
 
@@ -1923,11 +1924,45 @@
      state.weather stays null and the UI shows "Weather not connected yet"
      rather than a fabricated forecast. */
   /* The location every live widget (weather, destination guide, category
-     places) currently reflects. Defaults to the profile's favorite
-     location once loaded, but the user can switch it live via the search
-     box on any category page — see setExploreLocation(). */
+     places) currently reflects. Priority: an explicit choice always wins
+     — the location switcher (exploreLocation), then the profile's saved
+     favorite location. Absent either, this falls back to the real city
+     detected from the visitor's own IP address (see detectIpLocation()),
+     and only falls back to a hardcoded default if that lookup hasn't
+     resolved yet or failed. */
   function currentLocation(){
-    return state.exploreLocation || (state.profile.favoriteLocations && state.profile.favoriteLocations[0]) || 'Austin';
+    return state.exploreLocation
+      || (state.profile.favoriteLocations && state.profile.favoriteLocations[0])
+      || state.ipLocation.city
+      || 'Austin';
+  }
+
+  /* Real IP-based geolocation — no key, no signup. Tries ipapi.co first,
+     falls back to ipwho.is if that fails. Both resolve the *visitor's*
+     city from their own outbound IP address (this call happens in the
+     browser, not our backend, specifically so it reflects the person
+     actually looking at the site rather than Render's server IP). */
+  async function detectIpLocation(){
+    // Runs in parallel with loadUser() at startup, so it doesn't know yet
+    // whether a favorite location is set — that's fine, currentLocation()
+    // always prefers an explicit favorite location over this regardless.
+    state.ipLocation = Object.assign({}, state.ipLocation, { loading: true });
+    try{
+      let city = null;
+      try{
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        city = data && data.city ? data.city : null;
+      }catch(err){ /* fall through to backup provider */ }
+      if(!city){
+        const res2 = await fetch('https://ipwho.is/');
+        const data2 = await res2.json();
+        city = data2 && data2.success && data2.city ? data2.city : null;
+      }
+      state.ipLocation = { city, loading: false, resolved: true };
+    }catch(err){
+      state.ipLocation = { city: null, loading: false, resolved: true };
+    }
   }
 
   async function loadWeather(){
@@ -2182,9 +2217,12 @@
   renderGreeting();
   renderPage();
 
-  // loadUser first (it may update the favorite-location weather should use),
-  // then everything else in parallel.
-  loadUser().then(() => {
+  // loadUser (profile/favorite location) and detectIpLocation (real city
+  // from the visitor's own IP, used as the smart default when no favorite
+  // location is set) run in parallel — both need to settle before anything
+  // that reads currentLocation() fires, so weather/spotlight/etc. pick up
+  // whichever the user actually has.
+  Promise.all([ loadUser(), detectIpLocation() ]).then(() => {
     Promise.allSettled([ loadCalendar(), loadButlerRun(), loadWeather(), loadHomeSpotlight() ]).then(() => {
       renderGreeting();
       if(['home','profile','calendar'].includes(state.page)) renderPage();
