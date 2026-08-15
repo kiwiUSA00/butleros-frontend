@@ -698,6 +698,8 @@
     financeLoading: false,
     financeError: null,
     weather: null, // populated from /butler/weather — null until a real call succeeds
+    destinationGuide: null, // populated from /butler/destination-guide (Wikivoyage) — null until loaded
+    destinationGuideLoading: false,
   };
 
   const NAV = [
@@ -742,6 +744,7 @@
     renderNav();
     renderPage();
     if(page === 'finance') loadFinance();
+    if(page === 'travel') loadDestinationGuide();
   }
 
   /* ============ GREETING ============ */
@@ -888,8 +891,29 @@
         <h2>${title}</h2>
         <p>${tagline}</p>
       </div>
+      ${navKey === 'travel' ? destinationGuidePanel() : ''}
       <div class="curated-grid" id="curatedGrid">
         ${items.length ? items.map(curatedCard).join('') : `<div class="empty-state">Nothing curated here yet — make a request or check back once ButlerOS has run.</div>`}
+      </div>
+    `;
+  }
+
+  /* Real destination-guide excerpt from Wikivoyage (via /butler/destination-guide).
+     No fabricated copy — shows a loading/empty state honestly if it hasn't
+     loaded yet or the real call didn't succeed. */
+  function destinationGuidePanel(){
+    const g = state.destinationGuide;
+    if(state.destinationGuideLoading && !g){
+      return `<div class="panel" style="margin-bottom:20px;"><div class="loading-state">Pulling a destination guide...</div></div>`;
+    }
+    if(!g || !g.live){
+      return `<div class="panel" style="margin-bottom:20px;"><div class="empty-state">No destination guide loaded yet.</div></div>`;
+    }
+    return `
+      <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-head"><h3>${g.title}</h3><span class="conn-pill live" style="margin-left:8px;">Live · Wikivoyage</span></div>
+        <p style="color:var(--muted);line-height:1.6;font-size:14px;">${g.extract}</p>
+        <a class="footer-link" href="${g.url}" target="_blank" rel="noopener">Read the full guide on Wikivoyage ${icon('arrow')}</a>
       </div>
     `;
   }
@@ -1262,6 +1286,27 @@
       if(state.page === 'home') renderPage();
     }catch(err){
       // Backend unreachable — state.weather stays null.
+    }
+  }
+
+  /* ============ DESTINATION GUIDE (live) ============
+     Hits GET /butler/destination-guide, which pulls a real Wikivoyage
+     article excerpt server-side — no API key required on either end.
+     Shown on the Travel page. */
+  async function loadDestinationGuide(){
+    const location = (state.profile.favoriteLocations && state.profile.favoriteLocations[0]) || 'Austin';
+    if(state.destinationGuide && state.destinationGuide.location === location) return; // already have it
+    state.destinationGuideLoading = true;
+    if(state.page === 'travel') renderPage();
+    try{
+      const data = await apiGet('/butler/destination-guide?location=' + encodeURIComponent(location));
+      state.destinationGuide = Object.assign({ location }, data);
+      if(data.live) state.live = true;
+    }catch(err){
+      // Backend unreachable — state.destinationGuide stays whatever it was.
+    }finally{
+      state.destinationGuideLoading = false;
+      if(state.page === 'travel') renderPage();
     }
   }
 
