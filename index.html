@@ -3620,7 +3620,14 @@
       if((state.categoryViewMode[state.page] || 'groups') === 'focused') loadCategoryPlaces(state.page, { reset: true });
       else loadCategoryGroups(state.page, { reset: true });
     }
-    if(state.page === 'events') loadCityEvents(trimmed);
+    // Real bug found live: switching location anywhere except the Events
+    // page itself left Home's "Happening in <city>" panel (and the
+    // Calendar page's events teaser) still showing the old city, since
+    // this only re-fetched when already on the Events page. loadCityEvents()
+    // already only re-renders when actually useful (state.page === 'events'
+    // || 'home'), so it's safe to call unconditionally here too — same fix
+    // already applied to loadButlerRun()/loadHomeSpotlight() above.
+    loadCityEvents(trimmed);
   }
 
   /* ============ USER PROFILE (live) ============ */
