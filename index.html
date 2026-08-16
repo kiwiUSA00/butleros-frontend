@@ -908,6 +908,10 @@
     <div class="topbar">
       <button class="nav-toggle" id="navToggle" aria-label="Menu"></button>
       <div class="greeting" id="greeting"></div>
+      <div class="global-location-pill" style="display:flex;align-items:center;gap:6px;flex:1;max-width:280px;margin:0 12px;">
+        <input id="globalLocationInput" type="text" placeholder="Change location..." style="flex:1;min-width:0;padding:8px 14px;border:1px solid var(--line);border-radius:999px;font-size:13.5px;font-family:inherit;" />
+        <button class="icon-btn" id="globalLocationBtn" title="Change location" style="width:34px;height:34px;flex:none;"></button>
+      </div>
       <div class="profile-chip" id="profileChip">
         <div class="av" id="profileAv">A</div>
       </div>
@@ -1210,6 +1214,17 @@
     const name = '';
     document.getElementById('greeting').innerHTML = `${icon('sun')}<span>${g}${name}.</span>${pill}`;
     document.getElementById('profileAv').textContent = state.profile.name ? state.profile.name[0] : '?';
+    syncGlobalLocationInput();
+  }
+  // Keeps the topbar's global location field showing wherever the app is
+  // actually currently pointed (IP-detected, GPS-upgraded, or manually
+  // searched) — renderGreeting() already fires after every one of those
+  // changes, so hooking in here covers all of them in one place. Skipped
+  // while the visitor is actively typing in it so it doesn't clobber
+  // whatever they're mid-way through entering.
+  function syncGlobalLocationInput(){
+    const input = document.getElementById('globalLocationInput');
+    if(input && document.activeElement !== input) input.value = currentLocation();
   }
 
   /* ============ CURATED CARD ============ */
@@ -4096,6 +4111,28 @@
   //     submitChatMessage(text);
   //   }
   // });
+
+  /* ============ GLOBAL LOCATION SEARCH ============
+     Lives in the topbar right after the greeting, so it's on every page,
+     not just Home — one location control instead of the separate
+     per-page switchers. Routes through the same setExploreLocation() used
+     everywhere else, so it drives weather, Curated For You, category
+     pages, events, all of it. syncGlobalLocationInput() (see
+     renderGreeting()) keeps its displayed value matching wherever the app
+     is actually currently pointed. */
+  document.getElementById('globalLocationBtn').innerHTML = icon('compass');
+  (function(){
+    const input = document.getElementById('globalLocationInput');
+    const btn = document.getElementById('globalLocationBtn');
+    const submit = () => {
+      const val = (input.value || '').trim();
+      if(!val) return;
+      setExploreLocation(val);
+      input.blur();
+    };
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
+  })();
 
   /* ============ MOBILE NAV TOGGLE ============ */
   document.getElementById('navToggle').innerHTML = icon('menu');
