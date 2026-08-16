@@ -1006,6 +1006,7 @@
     messages: [], // chat history — shared by the Home "Ask Isabella" panel and the Messages page, so it's genuinely one continuing conversation regardless of which page it's typed from — see sendChatFrom() (rule-based assistant, no LLM)
     chatPlaceIndex: {}, // id -> real place item, for chat replies' clickable highlighted names
     chatContext: { lastLocation: null }, // remembers the last city actually discussed, so a follow-up like "what about coffee?" doesn't silently lose the thread
+    weekendPlan: { open:false, loading:false, result:null, mood:'', budget:250, location:'' }, // real POST /butler/plan-weekend results — a whole backend capability that already existed but was never surfaced in the UI
     unread: 0,
     requestSeq: 0,
     curatedLive: null,   // populated from /butler/run once available
@@ -1017,9 +1018,12 @@
     journal: { loading:false, entries:[], loadedFor:null, theme:'all' }, // real, themed Wikivoyage excerpts for the visitor's own location + favorites — see loadJournal()
     destinationGuideLoading: false,
     exploreLocation: null, // set to profile's favorite location once loaded; user can switch it live per category page
-    categoryPlaces: {}, // { [navKey]: { live, items, loading, loadingMore, location, query, nextPageToken } } — populated from /butler/places (Google Places)
-    categoryFilter: {}, // { [navKey]: selectedQueryString } — which refine chip (or custom search) is active per category
+    categoryPlaces: {}, // { [navKey]: { live, items, loading, loadingMore, location, query, nextPageToken } } — populated from /butler/places (Google Places), used by the "focused" single-list view
+    categoryFilter: {}, // { [navKey]: selectedQueryString } — which refine chip (or custom search) is active per category, in focused view
     categorySort: {}, // { [navKey]: 'relevance' | 'rating' } — client-side display sort over whatever's loaded
+    categoryViewMode: {}, // { [navKey]: 'groups' | 'focused' } — default 'groups': every sub-category shown as its own live section at once. 'focused' (via a chip, "See all", or search): one sub-category, full list, auto-loading.
+    categoryGroups: {}, // { [navKey]: [{ loading, items, live }, ...] } — parallel to CATEGORY_FILTERS[navKey], one real live result set per sub-category, for the grouped browse view
+    categoryGroupsKey: {}, // { [navKey]: geoCacheKey } — what location/precision categoryGroups[navKey] was last loaded for
     homeSpotlight: { live: false, items: [], loading: false, location: null }, // real top-rated picks across all categories, for the rotating home hero spotlight
     spotlightIndex: 0,
     detailItem: null, // normalized listing shown on the "detail" page (see openDetail())
@@ -1144,7 +1148,10 @@
     if(page === 'journal') loadJournal();
     if(page === 'events' && !state.myEvents.loadedOnce) loadMyEvents();
     if(page === 'events' && !state.cityEvents.location) loadCityEvents(currentLocation());
-    if(CATEGORY_FILTERS[page]) loadCategoryPlaces(page);
+    if(CATEGORY_FILTERS[page]){
+      if((state.categoryViewMode[page] || 'groups') === 'focused') loadCategoryPlaces(page);
+      else loadCategoryGroups(page);
+    }
     if(page === 'home') loadHomeSpotlight(); else stopSpotlightRotation();
   }
 
@@ -1245,6 +1252,8 @@
       sourceLabel: 'Google Places',
       price: raw.price != null ? raw.price : null,
       currency: raw.currency || null,
+      websiteUri: raw.websiteUri || null,
+      phone: raw.phone || null,
     };
   }
   function normalizeCuratedDetail(card){
@@ -1287,6 +1296,13 @@
       const bucket = state.categoryPlaces[navKey];
       const found = bucket && bucket.items && bucket.items.find(p => p.id === id);
       if(found) return found;
+    }
+    for(const navKey of Object.keys(state.categoryGroups)){
+      const groups = state.categoryGroups[navKey] || [];
+      for(const g of groups){
+        const found = g && g.items && g.items.find(p => p.id === id);
+        if(found) return found;
+      }
     }
     if(state.homeSpotlight && state.homeSpotlight.items){
       const found = state.homeSpotlight.items.find(p => p.id === id);
@@ -1535,11 +1551,19 @@
           ${relatedProductsPanel()}
         </div>
         <div class="detail-side">
+          ${(item.websiteUri || item.phone) ? `
+            <div class="panel" style="margin-bottom:16px;">
+              <div class="panel-head"><h3>Reserve Directly</h3></div>
+              <p style="font-size:12.5px;color:var(--muted);line-height:1.5;margin-bottom:12px;">Real contact info from Google — go straight to them, no middleman.</p>
+              ${item.websiteUri ? `<a class="btn-ghost" href="${item.websiteUri}" target="_blank" rel="noopener" style="width:100%;justify-content:center;margin-bottom:8px;">${icon('sparkle')} Visit Website</a>` : ''}
+              ${item.phone ? `<a class="btn-ghost" href="tel:${item.phone.replace(/[^+\d]/g,'')}" style="width:100%;justify-content:center;">${icon('phone')} Call ${item.phone}</a>` : ''}
+            </div>
+          ` : ''}
           <div class="panel">
             <div class="panel-head"><h3>Booking Timeline</h3></div>
             ${bookingTimeline()}
             <button class="btn-primary" id="detailBookBtn" style="width:100%;justify-content:center;margin-top:14px;" ${state.detailBookingRequestId ? 'disabled' : ''}>
-              ${state.detailBookingRequestId ? 'Request Sent' : 'Book Now'} ${icon('arrow')}
+              ${state.detailBookingRequestId ? 'Request Sent' : 'Ask Isabella to Book It'} ${icon('arrow')}
             </button>
           </div>
         </div>
@@ -1614,6 +1638,100 @@
     `;
   }
 
+  /* Surfaces POST /butler/plan-weekend — a real backend capability (mood +
+     budget + location → curated real experiences, plus real stays if a
+     provider is ever connected) that existed since early in this project
+     but was never actually reachable from the UI. Experiences come from
+     the same live Google Places/TripAdvisor/OpenTripMap pipeline used
+     elsewhere; stays currently come back honestly empty since Booking.com
+     and Airbnb have no self-serve API to call (see INTEGRATIONS.md) —
+     shown as a plain "not connected" note, never faked. */
+  function weekendPlanCard(item){
+    const img = item.photoName ? `${API_BASE}/butler/photo?name=${encodeURIComponent(item.photoName)}&w=500` : (item.imageUrl || '');
+    const rating = item.rating ? `<div class="pc-rating">${icon('star','pc-star')} ${item.rating.toFixed(1)}${item.userRatingCount ? `<span class="pc-count"> (${item.userRatingCount})</span>` : ''}</div>` : '';
+    const desc = item.description || item.address || '';
+    return `
+      <div class="place-card" data-weekend-item="${item.id}">
+        <div class="pc-media"${img ? ` style="background-image:url('${img}')"` : ''}>
+          ${!img ? `<div class="pc-fallback">${icon('compass')}</div>` : ''}
+        </div>
+        <div class="pc-body">
+          <div class="pc-title">${item.title}</div>
+          ${rating}
+          ${desc ? `<p class="pc-desc">${desc.length > 110 ? desc.slice(0,110).trim()+'…' : desc}</p>` : ''}
+        </div>
+      </div>
+    `;
+  }
+  function weekendPlanPanel(){
+    const wp = state.weekendPlan;
+    if(!wp.open){
+      return `
+        <div class="home-ask-panel">
+          <div class="home-ask-label">${icon('calendar')} Plan My Weekend</div>
+          <p class="home-ask-hint">Give Isabella a mood, a budget, and a city — she'll pull real experiences that actually match, live.</p>
+          <button class="btn-primary" id="openWeekendPlan">Plan My Weekend ${icon('arrow')}</button>
+        </div>
+      `;
+    }
+    if(wp.loading){
+      return `
+        <div class="home-ask-panel">
+          <div class="home-ask-label">${icon('calendar')} Plan My Weekend</div>
+          <div class="loading-state">Putting together real options for ${escapeHtml(wp.location || currentLocation())}...</div>
+        </div>
+      `;
+    }
+    if(wp.result){
+      const { stays, experiences } = wp.result;
+      return `
+        <div class="home-ask-panel">
+          <div class="home-ask-label">${icon('calendar')} Plan My Weekend</div>
+          <p style="font-size:12.5px;color:var(--muted);margin:-4px 0 14px;">${escapeHtml(wp.mood || 'A')} weekend in ${escapeHtml(wp.location)}, around $${wp.budget}.</p>
+          <div class="panel-head" style="margin-bottom:10px;"><h3 style="font-size:13px;">Experiences</h3>${experiences && experiences.length ? '<span class="conn-pill live">Live</span>' : ''}</div>
+          ${experiences && experiences.length
+            ? `<div class="place-grid" style="margin-bottom:18px;">${experiences.slice(0,4).map(weekendPlanCard).join('')}</div>`
+            : `<div class="empty-state" style="margin-bottom:18px;">No live experiences matched that mood/budget/location right now.</div>`}
+          <div class="panel-head" style="margin-bottom:10px;"><h3 style="font-size:13px;">Stays</h3></div>
+          ${stays && stays.length
+            ? `<div class="place-grid">${stays.slice(0,4).map(s => `
+                <div class="place-card"><div class="pc-body"><div class="pc-title">${s.title}</div><p class="pc-desc">$${s.price}${s.currency?' '+s.currency:''} · ${providerLabel(s.provider)}</p></div></div>
+              `).join('')}</div>`
+            : `<div class="empty-state">Not connected — Booking.com and Airbnb don't offer a self-serve booking API (see the app's INTEGRATIONS notes), so this stays honestly empty rather than showing fake listings.</div>`}
+          <button class="footer-link" id="replanWeekend" style="margin-top:16px;">Plan a different weekend ${icon('arrow')}</button>
+        </div>
+      `;
+    }
+    // open === true, no result yet: the form
+    return `
+      <div class="home-ask-panel">
+        <div class="home-ask-label">${icon('calendar')} Plan My Weekend</div>
+        <div class="form-row"><label>Mood</label><input id="wpMood" value="${escapeHtml(wp.mood)}" placeholder="relaxed, adventurous, romantic..." /></div>
+        <div class="form-row"><label>Budget</label><input id="wpBudget" type="number" min="0" value="${wp.budget}" /></div>
+        <div class="form-row"><label>Where</label><input id="wpLocation" value="${escapeHtml(wp.location || currentLocation())}" /></div>
+        <div style="display:flex;gap:10px;margin-top:14px;">
+          <button class="btn-primary" id="submitWeekendPlan">Plan It ${icon('arrow')}</button>
+          <button class="btn-ghost" id="cancelWeekendPlan">Cancel</button>
+        </div>
+      </div>
+    `;
+  }
+  async function submitWeekendPlan(){
+    const mood = (document.getElementById('wpMood').value || '').trim();
+    const budget = Number(document.getElementById('wpBudget').value) || 250;
+    const location = (document.getElementById('wpLocation').value || '').trim() || currentLocation();
+    state.weekendPlan = Object.assign({}, state.weekendPlan, { loading:true, mood, budget, location });
+    renderPage();
+    try{
+      const result = await apiPost('/butler/plan-weekend', { userId: USER_ID, mood, budget, location });
+      state.weekendPlan = Object.assign({}, state.weekendPlan, { loading:false, result });
+      if((result.experiences||[]).length || (result.stays||[]).length) state.live = true;
+    }catch(err){
+      state.weekendPlan = Object.assign({}, state.weekendPlan, { loading:false, result: { stays:[], experiences:[] } });
+    }
+    renderPage();
+  }
+
   function pageHome(){
     const curated = (state.curatedLive || []).slice(0,4);
     return `
@@ -1637,6 +1755,8 @@
       </section>
 
       ${homeAskPanel()}
+
+      <div id="weekendPlanSlot">${weekendPlanPanel()}</div>
 
       <div id="spotlightSlot">${spotlightCarousel()}</div>
 
@@ -1882,15 +2002,61 @@
     `;
   }
 
-  /* Real Google Places results for this category (via /butler/places) —
-     a different, live query per category, refined further by whichever
-     filter chip is active (see CATEGORY_FILTERS). Renders as a visual
-     card grid (real photo, rating, description) with a "Load more"
-     button that pages through further real results instead of capping
-     at a handful of items. */
+  /* Real Google Places results for this category (via /butler/places).
+     Two view modes (state.categoryViewMode[navKey]):
+     - 'groups' (default): every sub-category (see CATEGORY_FILTERS) shown
+       as its own live section at once — a real "browse by category"
+       layout instead of one flat list behind chips.
+     - 'focused': one sub-category (or a free-text search), the full
+       result set, auto-loading further real pages as you scroll — what
+       the page used to always show. Reached via a section's "See all",
+       a filter chip, or the search box. */
   function categoryPlacesPanel(navKey, title){
     const filters = CATEGORY_FILTERS[navKey];
     if(!filters) return '';
+    const viewMode = state.categoryViewMode[navKey] || 'groups';
+    return viewMode === 'focused' ? categoryFocusedPanel(navKey, title, filters) : categoryGroupsPanel(navKey, title, filters);
+  }
+
+  /* Default view: one real, live section per sub-category, each showing
+     its own top results — genuinely different content per section, not
+     the same feed re-filtered. */
+  function categoryGroupsPanel(navKey, title, filters){
+    const groups = state.categoryGroups[navKey] || [];
+    return `
+      <div class="category-search-row" style="margin-bottom:20px;">
+        <input type="text" class="cat-search-input" placeholder="Search ${title.toLowerCase()} — e.g. rooftop bars, vegan, live music..." data-search-input-cat="${navKey}" />
+        <button class="btn-ghost cat-search-btn" data-search-btn-cat="${navKey}">Search</button>
+      </div>
+      ${filters.map((f, i) => {
+        const g = groups[i];
+        let body;
+        if(!g || g.loading){
+          body = `<div class="loading-state">Finding live ${f.label.toLowerCase()} nearby...</div>`;
+        } else if(!g.live || !g.items.length){
+          body = `<div class="empty-state">No live results yet for ${currentLocation()}.</div>`;
+        } else {
+          body = `<div class="place-grid">${g.items.slice(0,6).map(placeCard).join('')}</div>`;
+        }
+        return `
+          <div class="panel places-panel" style="margin-bottom:20px;">
+            <div class="panel-head">
+              <h3>${f.label}</h3>
+              <div style="display:flex;align-items:center;gap:8px;">
+                ${g && g.live && g.items.length ? '<span class="conn-pill live">Live · Google Places</span>' : ''}
+                <button class="footer-link" data-group-seeall="${navKey}" data-group-index="${i}">See all ${icon('arrow')}</button>
+              </div>
+            </div>
+            ${body}
+          </div>
+        `;
+      }).join('')}
+    `;
+  }
+
+  /* Focused view: the full result set for one query, auto-loading
+     further real pages as the visitor scrolls (see loadMoreObserver). */
+  function categoryFocusedPanel(navKey, title, filters){
     const selectedQuery = state.categoryFilter[navKey] || filters[0].query;
     const isCustomQuery = !filters.some(f => f.query === selectedQuery);
     const data = state.categoryPlaces[navKey];
@@ -1934,7 +2100,7 @@
     return `
       <div class="panel places-panel" style="margin-bottom:20px;">
         <div class="panel-head">
-          <h3>Nearby, Live</h3>
+          <button class="footer-link" data-group-back="${navKey}" style="margin-right:auto;">${icon('arrow','detail-back-arrow')} All Categories</button>
           ${data && data.live && data.items.length ? '<span class="conn-pill live" style="margin-left:8px;">Live · Google Places</span>' : ''}
         </div>
         ${chips}
@@ -2444,6 +2610,12 @@
     root.querySelectorAll('[data-filter-cat]').forEach(el => {
       el.addEventListener('click', () => setCategoryFilter(el.dataset.filterCat, el.dataset.filterQuery));
     });
+    root.querySelectorAll('[data-group-seeall]').forEach(el => {
+      el.addEventListener('click', () => showFocusedCategory(el.dataset.groupSeeall, parseInt(el.dataset.groupIndex, 10)));
+    });
+    root.querySelectorAll('[data-group-back]').forEach(el => {
+      el.addEventListener('click', () => backToCategoryGroups(el.dataset.groupBack));
+    });
     // Auto-load: the moment a category grid's sentinel scrolls near the
     // viewport, fetch the next real page automatically — no manual "Load
     // more" click required. A fresh sentinel (new navKey+token) is wired
@@ -2499,6 +2671,30 @@
     if(homeAskSend){
       homeAskSend.addEventListener('click', () => sendChatFrom('homeAskInput'));
       homeAskInput.addEventListener('keydown', e => { if(e.key === 'Enter') sendChatFrom('homeAskInput'); });
+    }
+
+    const openWeekendPlan = document.getElementById('openWeekendPlan');
+    if(openWeekendPlan){
+      openWeekendPlan.addEventListener('click', () => {
+        state.weekendPlan = Object.assign({}, state.weekendPlan, { open:true, result:null });
+        renderPage();
+      });
+    }
+    const cancelWeekendPlan = document.getElementById('cancelWeekendPlan');
+    if(cancelWeekendPlan){
+      cancelWeekendPlan.addEventListener('click', () => {
+        state.weekendPlan = Object.assign({}, state.weekendPlan, { open:false, result:null });
+        renderPage();
+      });
+    }
+    const submitWeekendPlanBtn = document.getElementById('submitWeekendPlan');
+    if(submitWeekendPlanBtn) submitWeekendPlanBtn.addEventListener('click', () => submitWeekendPlan());
+    const replanWeekend = document.getElementById('replanWeekend');
+    if(replanWeekend){
+      replanWeekend.addEventListener('click', () => {
+        state.weekendPlan = Object.assign({}, state.weekendPlan, { open:true, result:null });
+        renderPage();
+      });
     }
 
     const saveProfile = document.getElementById('saveProfile');
@@ -2919,12 +3115,43 @@
     if(state.page === 'journal') renderPage();
   }
 
+  /* ============ CATEGORY GROUPS (live) ============
+     Powers the default grouped browse view: fetches every sub-category's
+     top real results in parallel (e.g. Dining's Best Restaurants, Cafes &
+     Coffee, Bars & Nightlife, Bakeries & Dessert all at once), each its
+     own genuine /butler/places call — never the same feed re-labeled
+     four times. Cached per geoCacheKey() so a GPS precision upgrade (or
+     an explicit location change) correctly triggers a refetch. */
+  async function loadCategoryGroups(navKey, opts){
+    opts = opts || {};
+    const filters = CATEGORY_FILTERS[navKey];
+    if(!filters) return;
+    const location = currentLocation();
+    const locationKey = geoCacheKey(location);
+    const existingKey = state.categoryGroupsKey[navKey];
+    const existing = state.categoryGroups[navKey];
+
+    if(!opts.reset && existingKey === locationKey && existing && existing.length === filters.length && existing.every(g => g && !g.loading)) return; // already have it
+
+    state.categoryGroups[navKey] = filters.map(() => ({ loading: true, items: [], live: false }));
+    state.categoryGroupsKey[navKey] = locationKey;
+    if(state.page === navKey) renderPage();
+
+    const results = await Promise.all(filters.map(f =>
+      apiGet(placesUrl(f.query, location)).catch(() => ({ live: false, items: [] }))
+    ));
+    state.categoryGroups[navKey] = results.map(r => ({ loading: false, items: r.items || [], live: !!r.live }));
+    if(results.some(r => r.live)) state.live = true;
+    if(state.page === navKey) renderPage();
+  }
+
   /* ============ CATEGORY PLACES (live) ============
      Hits GET /butler/places (real Google Places text search) with a
      category- and filter-specific query, for whichever category page is
-     open. Each category gets genuinely different, live results — not the
-     same feed reused four times — and `opts.pageToken` pages through
-     further real results ("Load more") instead of capping at a handful. */
+     open (focused view). Each category gets genuinely different, live
+     results — not the same feed reused four times — and `opts.pageToken`
+     pages through further real results (auto-loading) instead of capping
+     at a handful. */
   async function loadCategoryPlaces(navKey, opts){
     opts = opts || {};
     const filters = CATEGORY_FILTERS[navKey];
@@ -2970,11 +3197,13 @@
 
   /* Called from the free-text search box on a category page — treats
      whatever the user typed as a real live query (not limited to the
-     preset refine chips), reloading from scratch. */
+     preset refine chips), switches into the focused single-list view,
+     and reloads from scratch. */
   function setCategorySearch(navKey, text){
     const trimmed = (text || '').trim();
     if(!trimmed) return;
     state.categoryFilter[navKey] = trimmed;
+    state.categoryViewMode[navKey] = 'focused';
     loadCategoryPlaces(navKey, { reset: true });
   }
 
@@ -2985,18 +3214,38 @@
     renderPage();
   }
 
-  /* Called when a refine chip is clicked on a category page — switches
+  /* Called when a refine chip is clicked in the focused view — switches
      the live query for that category and reloads real results from
      scratch (fresh location, fresh pagination). */
   function setCategoryFilter(navKey, query){
     state.categoryFilter[navKey] = query;
+    state.categoryViewMode[navKey] = 'focused';
     loadCategoryPlaces(navKey, { reset: true });
+  }
+
+  /* "See all" on one of the grouped browse sections — jumps into the
+     focused view already scoped to that sub-category. */
+  function showFocusedCategory(navKey, index){
+    const filters = CATEGORY_FILTERS[navKey];
+    const filter = filters && filters[index];
+    if(!filter) return;
+    setCategoryFilter(navKey, filter.query);
+  }
+
+  /* Back out of the focused view into the grouped browse view. The
+     grouped data is usually still cached (loadCategoryGroups() only
+     re-fetches when the location/precision actually changed), so this is
+     normally instant — no refetch needed just to go back. */
+  function backToCategoryGroups(navKey){
+    state.categoryViewMode[navKey] = 'groups';
+    renderPage();
+    loadCategoryGroups(navKey);
   }
 
   /* Called from the location switcher on any category page. Clears
      cached live data tied to the old location and reloads everything
      for the new one — weather, destination guide (if on Travel), and
-     this category's places. */
+     this category's places (whichever view mode is active). */
   function setExploreLocation(newLocation){
     const trimmed = (newLocation || '').trim();
     if(!trimmed) return;
@@ -3004,10 +3253,15 @@
     state.weather = null;
     state.destinationGuide = null;
     state.categoryPlaces = {};
+    state.categoryGroups = {};
+    state.categoryGroupsKey = {};
     renderPage();
     loadWeather();
     if(state.page === 'travel') loadDestinationGuide();
-    if(CATEGORY_FILTERS[state.page]) loadCategoryPlaces(state.page, { reset: true });
+    if(CATEGORY_FILTERS[state.page]){
+      if((state.categoryViewMode[state.page] || 'groups') === 'focused') loadCategoryPlaces(state.page, { reset: true });
+      else loadCategoryGroups(state.page, { reset: true });
+    }
     if(state.page === 'events') loadCityEvents(trimmed);
   }
 
@@ -3187,14 +3441,11 @@
      so typing on Home genuinely continues the same conversation you'd see
      on Messages, instead of Home being a disconnected one-shot request
      box. */
-  async function sendChatFrom(inputId){
-    const input = document.getElementById(inputId);
-    if(!input) return;
-    const text = input.value.trim();
+  async function submitChatMessage(text){
+    text = (text || '').trim();
     if(!text) return;
     const now = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
     state.messages.push({ from:'me', text: escapeHtml(text), time: now() });
-    input.value = '';
     const typingMsg = { from:'them', text:'Isabella is thinking...', time: now(), typing:true };
     state.messages.push(typingMsg);
     renderChatOnly();
@@ -3209,6 +3460,14 @@
     const idx = state.messages.indexOf(typingMsg);
     if(idx !== -1) state.messages.splice(idx, 1, { from:'them', text: reply.text, time: now() });
     renderChatOnly();
+  }
+  async function sendChatFrom(inputId){
+    const input = document.getElementById(inputId);
+    if(!input) return;
+    const text = input.value.trim();
+    if(!text) return;
+    input.value = '';
+    return submitChatMessage(text);
   }
   function sendChat(){ return sendChatFrom('chatInput'); }
 
@@ -3307,13 +3566,20 @@
   }
 
   /* ============ TOP SEARCH ============ */
+  // Genuinely conversational, everywhere in the app — typing here used to
+  // just fire the generic /butler/run booking cycle (a canned "on it"
+  // confirmation regardless of what was actually typed). Now it's the
+  // exact same real, context-aware assistant as Messages/the Home "Ask
+  // Isabella" panel: same shared conversation, same live results — just
+  // reachable from any page instead of only Home or Messages.
   const topSearch = document.getElementById('topSearch');
   topSearch.addEventListener('keydown', e => {
     if(e.key === 'Enter'){
       const text = topSearch.value.trim();
       if(!text) return;
       topSearch.value = '';
-      submitRequest(text);
+      navigate('messages');
+      submitChatMessage(text);
     }
   });
 
@@ -3369,6 +3635,7 @@
     // above) is what makes each of these re-fetch instead of no-op.
     loadHomeSpotlight();
     Object.keys(state.categoryPlaces).forEach(navKey => loadCategoryPlaces(navKey, { reset: true }));
+    Object.keys(state.categoryGroups).forEach(navKey => loadCategoryGroups(navKey, { reset: true }));
     if(state.page === 'detail') renderPage();
   });
 
