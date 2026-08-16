@@ -1638,7 +1638,7 @@
 
       ${homeAskPanel()}
 
-      ${spotlightCarousel()}
+      <div id="spotlightSlot">${spotlightCarousel()}</div>
 
       <section class="section">
         <div class="section-head">
@@ -1766,7 +1766,7 @@
     spotlightTimer = setInterval(() => {
       if(state.page !== 'home'){ stopSpotlightRotation(); return; }
       state.spotlightIndex = (state.spotlightIndex + 1) % state.homeSpotlight.items.length;
-      renderPage();
+      renderSpotlightOnly();
     }, 5500);
   }
   function stopSpotlightRotation(){
@@ -1776,11 +1776,42 @@
     const s = state.homeSpotlight;
     if(!s || !s.items.length) return;
     state.spotlightIndex = ((idx % s.items.length) + s.items.length) % s.items.length;
-    renderPage();
+    renderSpotlightOnly();
     startSpotlightRotation();
   }
   function spotlightNext(){ spotlightGoTo(state.spotlightIndex + 1); }
   function spotlightPrev(){ spotlightGoTo(state.spotlightIndex - 1); }
+
+  // Wires the spotlight's own prev/next/dot/detail controls — pulled out
+  // so it can run both after a full page render and after a targeted
+  // spotlight-only update (see renderSpotlightOnly()).
+  function wireSpotlightControls(root){
+    const spotlightPrevBtn = root.querySelector('#spotlightPrev');
+    const spotlightNextBtn = root.querySelector('#spotlightNext');
+    if(spotlightPrevBtn) spotlightPrevBtn.addEventListener('click', () => spotlightPrev());
+    if(spotlightNextBtn) spotlightNextBtn.addEventListener('click', () => spotlightNext());
+    root.querySelectorAll('[data-spotlight-dot]').forEach(el => {
+      el.addEventListener('click', () => spotlightGoTo(parseInt(el.dataset.spotlightDot, 10)));
+    });
+    const spotlightDetailBtn = root.querySelector('#spotlightDetailBtn');
+    if(spotlightDetailBtn){
+      spotlightDetailBtn.addEventListener('click', () => {
+        const item = findPlaceItemById(spotlightDetailBtn.dataset.spotlightPlaceId);
+        if(item) openDetail(normalizePlaceDetail(item));
+      });
+    }
+  }
+  // Re-renders only the spotlight carousel in place, leaving the rest of
+  // the Home page — most importantly, whatever's being typed into the
+  // "Ask Isabella" panel — completely untouched. Rotating/cycling the
+  // spotlight used to call the full renderPage(), which silently wiped
+  // out any in-progress conversation input every 5.5s.
+  function renderSpotlightOnly(){
+    const slot = document.getElementById('spotlightSlot');
+    if(!slot){ renderPage(); return; } // not on Home right now — fall back safely
+    slot.innerHTML = spotlightCarousel();
+    wireSpotlightControls(slot);
+  }
 
   const SPOTLIGHT_CATEGORY_LABEL = { lifestyle: 'Lifestyle', travel: 'Travel', dining: 'Dining', wellness: 'Wellness' };
 
@@ -2434,13 +2465,7 @@
       sel.addEventListener('change', () => setCategorySort(sel.dataset.sortCat, sel.value));
     });
 
-    const spotlightPrevBtn = document.getElementById('spotlightPrev');
-    const spotlightNextBtn = document.getElementById('spotlightNext');
-    if(spotlightPrevBtn) spotlightPrevBtn.addEventListener('click', () => spotlightPrev());
-    if(spotlightNextBtn) spotlightNextBtn.addEventListener('click', () => spotlightNext());
-    root.querySelectorAll('[data-spotlight-dot]').forEach(el => {
-      el.addEventListener('click', () => spotlightGoTo(parseInt(el.dataset.spotlightDot, 10)));
-    });
+    wireSpotlightControls(root);
 
     root.querySelectorAll('[data-place-id]').forEach(el => {
       el.addEventListener('click', () => {
@@ -2448,13 +2473,6 @@
         if(item) openDetail(normalizePlaceDetail(item));
       });
     });
-    const spotlightDetailBtn = document.getElementById('spotlightDetailBtn');
-    if(spotlightDetailBtn){
-      spotlightDetailBtn.addEventListener('click', () => {
-        const item = findPlaceItemById(spotlightDetailBtn.dataset.spotlightPlaceId);
-        if(item) openDetail(normalizePlaceDetail(item));
-      });
-    }
     root.querySelectorAll('[data-open-pick]').forEach(el => {
       el.addEventListener('click', () => {
         const req = state.requests.find(r => String(r.id) === el.dataset.openPick);
@@ -3050,16 +3068,21 @@
   const CHAT_ACK_RE = /^(thanks|thank you|thx|ty|ok|okay|k|kk|cool|great|nice|awesome|perfect|sounds good|sounds great|got it|good|yes|yep|yeah|sure|why not|sweet)[\s!.,]*$/i;
   const CHAT_HELP_RE = /\b(help|what can you do|capabilities)\b/i;
 
-  /* Pulls "in/for/near/around <Place>" out of a message. Capitalized-word
-     heuristic (no NLP available) — good enough for city names typed
-     naturally ("dinner in Austin", "weather in New York"). If nothing's
-     named, prefers whatever city was actually discussed most recently in
-     this conversation (state.chatContext.lastLocation) over silently
-     jumping back to the visitor's own location — a real conversation
-     doesn't lose the thread just because a follow-up left the city out. */
+  /* Pulls "in/for/near/around/about <Place>" out of a message.
+     Capitalized-word heuristic (no NLP available) — good enough for city
+     names typed naturally ("dinner in Austin", "weather in New York",
+     "tell me about Lisbon"). "about" matters here specifically because
+     it's how the guide intent's own trigger phrase ("tell me about X")
+     names its place — without it, "tell me about Lisbon" would silently
+     fall through to whatever city was last discussed instead of Lisbon.
+     If nothing's named, prefers whatever city was actually discussed most
+     recently in this conversation (state.chatContext.lastLocation) over
+     silently jumping back to the visitor's own location — a real
+     conversation doesn't lose the thread just because a follow-up left
+     the city out. */
   function parseChatIntent(text){
     const lower = text.toLowerCase();
-    const locMatch = text.match(/\b(?:in|for|near|around)\s+([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})/);
+    const locMatch = text.match(/\b(?:in|for|near|around|about)\s+([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})/);
     const explicitLocation = !!locMatch;
     const location = locMatch ? locMatch[1].trim() : (state.chatContext.lastLocation || currentLocation());
 
