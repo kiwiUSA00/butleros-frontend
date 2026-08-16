@@ -622,6 +622,10 @@
   .msg.them{ background:var(--cream); align-self:flex-start; border-bottom-left-radius:4px; }
   .msg.me{ background:var(--black); color:#fff; align-self:flex-end; border-bottom-right-radius:4px; }
   .msg-time{ font-size:10px; color:var(--muted-2); margin-top:4px; }
+  .msg.typing{ opacity:0.6; font-style:italic; }
+  .chat-place-link{ font-weight:700; color:var(--gold); cursor:pointer; text-decoration:underline; text-decoration-color:transparent; transition:text-decoration-color .15s ease; }
+  .chat-place-link:hover{ text-decoration-color:var(--gold); }
+  .msg a{ color:inherit; font-weight:600; }
   .typing{ display:flex; gap:4px; align-self:flex-start; padding:11px 15px; background:var(--cream); border-radius:16px; border-bottom-left-radius:4px; }
   .typing span{ width:5px; height:5px; border-radius:50%; background:var(--muted-2); animation:blink 1.2s infinite; }
   .typing span:nth-child(2){ animation-delay:0.2s; } .typing span:nth-child(3){ animation-delay:0.4s; }
@@ -653,6 +657,10 @@
   /* ---------- finance page ---------- */
   .fin-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:22px; }
   @media (max-width:820px){ .fin-grid{ grid-template-columns:1fr; } }
+
+  .journal-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:820px){ .journal-grid{ grid-template-columns:1fr; } }
+  .journal-card{ background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:20px; }
   .fin-account{ background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:18px; }
   .fin-account .fa-name{ font-size:12px; color:var(--muted); margin-bottom:6px; }
   .fin-account .fa-balance{ font-family:'Fraunces',serif; font-size:24px; font-weight:500; }
@@ -702,6 +710,20 @@
   .related-product-add svg{ width:10px; height:10px; }
   .related-product-actions a{ font-size:11px; font-weight:600; color:var(--muted); display:flex; align-items:center; gap:3px; text-decoration:none; }
   .related-product-actions a svg{ width:10px; height:10px; }
+
+  .ride-btn{
+    display:inline-flex; align-items:center; gap:8px;
+    border-radius:999px; padding:10px 18px;
+    font-size:13px; font-weight:700;
+    text-decoration:none; cursor:pointer;
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .ride-btn:hover{ transform:translateY(-1px); }
+  .ride-btn svg{ width:13px; height:13px; }
+  .ride-btn-uber{ background:#000; color:#fff; }
+  .ride-btn-uber:hover{ box-shadow:0 10px 20px -10px rgba(0,0,0,0.5); }
+  .ride-btn-lyft{ background:#FF00BF; color:#fff; }
+  .ride-btn-lyft:hover{ box-shadow:0 10px 20px -10px rgba(255,0,191,0.5); }
 
   /* ---------- toast ---------- */
   .toast-stack{ position:fixed; bottom:24px; right:24px; display:flex; flex-direction:column; gap:10px; z-index:200; }
@@ -893,7 +915,8 @@
     events: [],   // populated from /butler/calendar-events/:userId
     picks: [],    // no live source for editorial "picks" yet — stays empty until one exists
     requests: [],
-    messages: [], // no live chat backend yet — see sendChat()
+    messages: [], // chat history — see sendChat() (rule-based assistant, no LLM)
+    chatPlaceIndex: {}, // id -> real place item, for chat replies' clickable highlighted names
     unread: 0,
     requestSeq: 0,
     curatedLive: null,   // populated from /butler/run once available
@@ -902,6 +925,7 @@
     financeError: null,
     weather: null, // populated from /butler/weather — null until a real call succeeds
     destinationGuide: null, // populated from /butler/destination-guide (Wikivoyage) — null until loaded
+    journal: { loading:false, entries:[], loadedFor:null }, // real Wikivoyage excerpts for the visitor's own location + favorites — see loadJournal()
     destinationGuideLoading: false,
     exploreLocation: null, // set to profile's favorite location once loaded; user can switch it live per category page
     categoryPlaces: {}, // { [navKey]: { live, items, loading, loadingMore, location, query, nextPageToken } } — populated from /butler/places (Google Places)
@@ -1009,6 +1033,7 @@
     renderPage();
     if(page === 'finance') loadFinance();
     if(page === 'travel') loadDestinationGuide();
+    if(page === 'journal') loadJournal();
     if(CATEGORY_FILTERS[page]) loadCategoryPlaces(page);
     if(page === 'home') loadHomeSpotlight(); else stopSpotlightRotation();
   }
@@ -1103,6 +1128,7 @@
       rating: raw.rating || null,
       userRatingCount: raw.userRatingCount || null,
       description: raw.description || null,
+      category: raw.category || null,
       address: raw.address || null,
       locationLabel: raw.address || currentLocation(),
       url: raw.url || null,
@@ -1116,7 +1142,7 @@
     if(card.kindData === 'travel'){
       return {
         kind:'curated-travel', title: raw.title || card.title, badgeLabel:'Travel', photoName:null, imageUrl:null,
-        rating:null, userRatingCount:null, description: null, address:null, locationLabel: raw.location || currentLocation(),
+        rating:null, userRatingCount:null, description: null, category:null, address:null, locationLabel: raw.location || currentLocation(),
         url: raw.url || null, sourceLabel: providerLabel(raw.provider), price: raw.price != null ? raw.price : null, currency: raw.currency || null,
       };
     }
@@ -1124,7 +1150,7 @@
       const booking = (raw.bookingOptions || [])[0];
       return {
         kind:'curated-experience', title: raw.title || card.title, badgeLabel:'Experience', photoName: raw.photoName || null, imageUrl: raw.imageUrl || null,
-        rating: raw.rating || null, userRatingCount: raw.userRatingCount || null, description: raw.description || card.sub, address: raw.address || null, locationLabel: raw.address || raw.location || currentLocation(),
+        rating: raw.rating || null, userRatingCount: raw.userRatingCount || null, description: raw.description || card.sub, category: raw.category || null, address: raw.address || null, locationLabel: raw.address || raw.location || currentLocation(),
         url: booking ? booking.url : null, sourceLabel: booking ? providerLabel(booking.provider) : 'BOS', price:null, currency:null,
       };
     }
@@ -1287,10 +1313,10 @@
     return `
       <div class="panel" style="margin-top:16px;">
         <div class="panel-head"><h3>Need a Ride There?</h3></div>
-        <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;">Opens with your pickup and this address pre-filled.</p>
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;">Opens the app with your pickup and this address pre-filled — falls back to the web on desktop.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <a class="btn-ghost" href="https://m.uber.com/ul/?${uberParams.toString()}" target="_blank" rel="noopener">${icon('compass')} Request via Uber</a>
-          <a class="btn-ghost" href="https://ride.lyft.com/ride?${lyftParams.toString()}" target="_blank" rel="noopener">${icon('compass')} Request via Lyft</a>
+          <a class="ride-btn ride-btn-uber" href="https://m.uber.com/ul/?${uberParams.toString()}" target="_blank" rel="noopener">${icon('compass')} Request via Uber</a>
+          <a class="ride-btn ride-btn-lyft" href="https://lyft.com/ride?${lyftParams.toString()}" target="_blank" rel="noopener">${icon('compass')} Request via Lyft</a>
         </div>
       </div>
     `;
@@ -1352,10 +1378,29 @@
     `;
   }
 
+  /* When a place has no editorial summary (common — most Google Places
+     results don't have one), build one true sentence out of whatever real
+     fields we do have (place type, rating, address) rather than showing a
+     bare "no description" message. Every clause here is a genuine field
+     from the API response; nothing is invented. Returns null (and the
+     caller shows an honest empty state) only if we truly have nothing. */
+  function fallbackDescriptionFor(item){
+    const bits = [];
+    if(item.category) bits.push(item.category);
+    if(item.rating) bits.push(`rated ${item.rating.toFixed(1)}★${item.userRatingCount ? ` from ${item.userRatingCount.toLocaleString()} reviews` : ''}`);
+    if(!bits.length) return null;
+    const lead = item.category ? item.category : 'A live pick';
+    const rest = bits.slice(item.category ? 1 : 0);
+    let sentence = lead.charAt(0).toUpperCase() + lead.slice(1) + (rest.length ? `, ${rest.join(', ')}` : '');
+    if(item.address || item.locationLabel) sentence += ` in ${item.address || item.locationLabel}`;
+    return sentence + '.';
+  }
+
   function pageDetail(){
     const item = state.detailItem;
     if(!item) return `<div class="empty-state">Nothing selected.</div>`;
     const img = item.photoName ? `${API_BASE}/butler/photo?name=${encodeURIComponent(item.photoName)}&w=1200` : (item.imageUrl || '');
+    const fallbackDesc = item.description ? null : fallbackDescriptionFor(item);
     return `
       <button class="footer-link" id="detailBackBtn" style="margin-bottom:16px;">${icon('arrow','detail-back-arrow')} Back</button>
       <div class="detail-hero"${img ? ` style="background-image:linear-gradient(180deg, rgba(20,16,10,0.05) 40%, rgba(20,16,10,0.78)), url('${img}')"` : ''}>
@@ -1367,7 +1412,9 @@
         <div class="detail-main">
           <div class="panel">
             <div class="panel-head"><h3>Details</h3></div>
-            ${item.description ? `<p style="color:var(--muted);line-height:1.6;font-size:14px;">${item.description}</p>` : `<div class="empty-state" style="padding:6px 0;">No description available.</div>`}
+            ${item.description ? `<p style="color:var(--muted);line-height:1.6;font-size:14px;">${item.description}</p>`
+              : fallbackDesc ? `<p style="color:var(--muted);line-height:1.6;font-size:14px;">${fallbackDesc}</p>`
+              : `<div class="empty-state" style="padding:6px 0;">No description available.</div>`}
             ${item.address ? `<div class="detail-meta-row">${icon('compass')} ${item.address}</div>` : (item.locationLabel ? `<div class="detail-meta-row">${icon('compass')} ${item.locationLabel}</div>` : '')}
             ${item.price != null ? `<div class="detail-meta-row">${icon('wallet')} ~$${item.price}${item.currency ? ' ' + item.currency : ''}</div>` : ''}
             <div class="detail-meta-row">${icon('sparkle')} Source: ${item.sourceLabel}${item.url ? ` · <a href="${item.url}" target="_blank" rel="noopener">View original ${icon('arrow')}</a>` : ''}</div>
@@ -1390,6 +1437,18 @@
   }
 
   /* ============ PAGES ============ */
+  /* Real photo for the "Today's Edition" masthead — the first item in the
+     live home spotlight (same source as the carousel below), so the
+     hero genuinely reflects something real and currently live rather
+     than a stock/decorative image. Null (gradient-only) until the
+     spotlight has loaded or if nothing came back live. */
+  function heroArtImg(){
+    const items = state.homeSpotlight && state.homeSpotlight.items;
+    const first = items && items[0];
+    if(!first) return null;
+    return first.photoName ? `${API_BASE}/butler/photo?name=${encodeURIComponent(first.photoName)}&w=900` : (first.imageUrl || null);
+  }
+
   function pageHome(){
     const curated = (state.curatedLive || []).slice(0,4);
     return `
@@ -1400,7 +1459,7 @@
           <p>Thoughtfully curated recommendations and seamless service for a life well-lived.</p>
           <button class="btn-primary" id="heroRequestBtn">Make a Request ${icon('arrow')}</button>
         </div>
-        <div class="hero-art">
+        <div class="hero-art"${heroArtImg() ? ` style="background-image:linear-gradient(155deg, rgba(239,217,184,0.18), rgba(140,108,78,0.55)), url('${heroArtImg()}');background-size:cover;background-position:center;"` : ''}>
           <div class="rings"></div>
           <div class="float-card">
             ${icon('sun')}
@@ -1505,7 +1564,7 @@
       const navKeys = Object.keys(CATEGORY_FILTERS);
       const results = await Promise.all(navKeys.map(navKey => {
         const q = CATEGORY_FILTERS[navKey][0].query;
-        return apiGet('/butler/places?query=' + encodeURIComponent(q) + '&location=' + encodeURIComponent(location))
+        return apiGet(placesUrl(q, location))
           .catch(() => ({ live: false, items: [] }));
       }));
       let merged = [];
@@ -1843,12 +1902,41 @@
         <div class="chat-messages" id="chatMessages">
           ${state.messages.length ? state.messages.map(m => `
             <div class="msg ${m.from==='me'?'me':'them'}">${m.text}<div class="msg-time">${m.time}</div></div>
-          `).join('') : `<div class="empty-state">No messages yet. BOS doesn't have a live chat backend connected — sending a message here won't reach anyone yet.</div>`}
+          `).join('') : `<div class="empty-state">Ask Isabella about restaurants, things to do, the weather, or a destination — e.g. "good restaurants in Austin" or "what's the weather in Lisbon". She'll pull real, live results and link straight to them.</div>`}
         </div>
         <div class="chat-input">
           <input id="chatInput" type="text" placeholder="Message Isabella..." />
           <button class="send-btn" id="chatSend">${icon('send')}</button>
         </div>
+      </div>
+    `;
+  }
+
+  function pageJournal(){
+    const j = state.journal;
+    return `
+      <button class="footer-link" data-nav="home" style="margin-bottom:16px;">${icon('arrow','detail-back-arrow')} Back</button>
+      <div class="page-head">
+        <div class="eyebrow">Reading</div>
+        <h2>The Journal</h2>
+        <p>Real destination notes for wherever you are, and the places you've told BOS you love.</p>
+      </div>
+      ${j.loading && !j.entries.length ? `<div class="loading-state">Pulling real destination notes...</div>` : ''}
+      ${!j.loading && !j.entries.length ? `<div class="empty-state">No live destination notes available right now — Wikivoyage may be unreachable, or nothing matched your current or favorite locations.</div>` : ''}
+      <div class="journal-grid">
+        ${j.entries.map(e => {
+          const short = e.extract.length > 420 ? e.extract.slice(0,420).trim() + '…' : e.extract;
+          return `
+            <article class="journal-card">
+              <div class="panel-head"><h3>${e.title || e.location}</h3><span class="conn-pill live" style="margin-left:8px;">Live · Wikivoyage</span></div>
+              <p style="color:var(--muted);line-height:1.65;font-size:14px;">${short}</p>
+              <div style="display:flex;gap:14px;align-items:center;margin-top:14px;flex-wrap:wrap;">
+                <button class="btn-ghost" data-journal-explore="${e.location}">${icon('compass')} Explore ${e.location}</button>
+                ${e.url ? `<a class="footer-link" href="${e.url}" target="_blank" rel="noopener">Read on Wikivoyage ${icon('arrow')}</a>` : ''}
+              </div>
+            </article>
+          `;
+        }).join('')}
       </div>
     `;
   }
@@ -1978,6 +2066,7 @@
     else if(state.page === 'requests') html = pageRequests();
     else if(state.page === 'messages') html = pageMessages();
     else if(state.page === 'profile') html = pageProfile();
+    else if(state.page === 'journal') html = pageJournal();
     else if(state.page === 'detail') html = pageDetail();
 
     root.innerHTML = html;
@@ -1995,7 +2084,10 @@
     if(heroBtn) heroBtn.addEventListener('click', () => openRequestModal());
 
     const journalBtn = document.getElementById('journalBtn');
-    if(journalBtn) journalBtn.addEventListener('click', () => toast('Opening the Journal...'));
+    if(journalBtn) journalBtn.addEventListener('click', () => navigate('journal'));
+    root.querySelectorAll('[data-journal-explore]').forEach(el => {
+      el.addEventListener('click', () => { setExploreLocation(el.dataset.journalExplore); navigate('travel'); });
+    });
 
     const newRequestBtn = document.getElementById('newRequestBtn');
     if(newRequestBtn) newRequestBtn.addEventListener('click', () => openRequestModal());
@@ -2210,6 +2302,25 @@
       || 'Austin';
   }
 
+  /* Real coordinates to bias/rank Places results by actual distance —
+     only when the location being searched IS where the visitor's IP says
+     they really are (never applied to an explicitly-typed different city,
+     where "close to me" wouldn't make sense) and only ever the visitor's
+     own genuine IP-geolocated position (never estimated/fabricated). */
+  function precisionCoordsFor(location){
+    if(state.ipLocation.city && location === state.ipLocation.city && state.ipLocation.lat != null && state.ipLocation.lon != null){
+      return { lat: state.ipLocation.lat, lon: state.ipLocation.lon };
+    }
+    return null;
+  }
+  function placesUrl(query, location, extra){
+    let url = '/butler/places?query=' + encodeURIComponent(query) + '&location=' + encodeURIComponent(location);
+    const coords = precisionCoordsFor(location);
+    if(coords) url += '&lat=' + coords.lat + '&lon=' + coords.lon;
+    if(extra && extra.pageToken) url += '&pageToken=' + encodeURIComponent(extra.pageToken);
+    return url;
+  }
+
   /* Real IP-based geolocation — no key, no signup. Tries ipapi.co first,
      falls back to ipwho.is if that fails. Both resolve the *visitor's*
      city from their own outbound IP address (this call happens in the
@@ -2279,6 +2390,32 @@
     }
   }
 
+  /* ============ JOURNAL (live) ============
+     "Journal" entries are real Wikivoyage destination-guide excerpts (same
+     source as the Travel page's guide panel) for wherever the visitor
+     genuinely is right now plus their saved favorite locations — not
+     invented editorial copy. Each entry links to the real Wikivoyage
+     article and can jump straight into that location's live Travel page. */
+  async function loadJournal(){
+    const candidates = [currentLocation()].concat(state.profile.favoriteLocations || []);
+    const locations = Array.from(new Set(candidates.filter(Boolean))).slice(0, 4);
+    if(state.journal.loadedFor === locations.join('|') && state.journal.entries.length) return;
+    state.journal = { loading:true, entries: state.journal.entries, loadedFor: null };
+    if(state.page === 'journal') renderPage();
+    try{
+      const results = await Promise.all(locations.map(loc =>
+        apiGet('/butler/destination-guide?location=' + encodeURIComponent(loc))
+          .then(data => Object.assign({ location: loc }, data))
+          .catch(() => ({ location: loc, live:false }))
+      ));
+      const entries = results.filter(r => r.live && r.extract);
+      state.journal = { loading:false, entries, loadedFor: locations.join('|') };
+    }catch(err){
+      state.journal = { loading:false, entries: [], loadedFor: null };
+    }
+    if(state.page === 'journal') renderPage();
+  }
+
   /* ============ CATEGORY PLACES (live) ============
      Hits GET /butler/places (real Google Places text search) with a
      category- and filter-specific query, for whichever category page is
@@ -2304,8 +2441,7 @@
     if(state.page === navKey) renderPage();
 
     try{
-      let url = '/butler/places?query=' + encodeURIComponent(query) + '&location=' + encodeURIComponent(location);
-      if(opts.pageToken) url += '&pageToken=' + encodeURIComponent(opts.pageToken);
+      const url = placesUrl(query, location, { pageToken: opts.pageToken });
       const data = await apiGet(url);
       const priorItems = loadingMore ? (state.categoryPlaces[navKey].items || []) : [];
       const items = priorItems.concat(data.items || []);
@@ -2393,23 +2529,123 @@
      message just records it locally and says so honestly, rather than
      faking a reply from "Isabella." Use the request modal / top search to
      actually trigger a real /butler/run cycle. */
-  function sendChat(){
+  /* ============ ASSISTANT CHAT (rule-based, no LLM/API key) ============
+     Parses a free-text message for intent (weather / destination guide /
+     a category of place) and a location (an explicit city mentioned in
+     the message, or currentLocation() otherwise), then calls the same
+     real backend endpoints the rest of the app uses (/butler/weather,
+     /butler/destination-guide, /butler/places) and replies with genuine
+     results — real place names, ratings, and a short real excerpt —
+     never invented copy. Highlighted place names in a reply are clickable
+     and open the real detail page, which is the "link things together"
+     behavior requested. */
+  function escapeHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  }
+  const CHAT_CATEGORY_INTENTS = [
+    { keys:['restaurant','dinner','lunch','brunch','eat','food','cuisine','dining','coffee','cafe','café','bar','drinks'], query:'restaurants',
+      opener: loc => `For dining in ${escapeHtml(loc)}, I'd steer you toward` },
+    { keys:['spa','massage','yoga','wellness','relax','meditation','gym','fitness'], query:'spa and wellness',
+      opener: loc => `For unwinding in ${escapeHtml(loc)}, try` },
+    { keys:['museum','gallery','art','attraction','sightsee','activity','activities','park','tour','things to do'], query:'things to do',
+      opener: loc => `Worth doing in ${escapeHtml(loc)}:` },
+    { keys:['hotel','stay','flight','trip','vacation','weekend'], query:'travel experiences',
+      opener: loc => `Around ${escapeHtml(loc)}, consider` },
+    { keys:['shop','shopping','gift','store','boutique'], query:'shopping',
+      opener: loc => `For shopping in ${escapeHtml(loc)}, look at` },
+  ];
+  const CHAT_WEATHER_KEYS = ['weather','temperature','forecast','how hot','how cold','degrees','rain','sunny'];
+  const CHAT_GUIDE_KEYS = ["what's","what is","tell me about","know about","overview of","guide to","guide for"];
+  const CHAT_GREETING_RE = /^(hi|hello|hey|thanks|thank you|ok|okay|cool|great|nice)[\s!.,]*$/i;
+  const CHAT_HELP_RE = /\b(help|what can you do|capabilities)\b/i;
+
+  /* Pulls "in/for/near/around <Place>" out of a message. Capitalized-word
+     heuristic (no NLP available) — good enough for city names typed
+     naturally ("dinner in Austin", "weather in New York"). Falls back to
+     wherever BOS already thinks the visitor is. */
+  function parseChatIntent(text){
+    const lower = text.toLowerCase();
+    const locMatch = text.match(/\b(?:in|for|near|around)\s+([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})/);
+    const location = locMatch ? locMatch[1].trim() : currentLocation();
+    const explicitLocation = !!locMatch;
+
+    if(CHAT_GREETING_RE.test(text.trim())) return { type:'greeting' };
+    if(CHAT_HELP_RE.test(lower)) return { type:'help' };
+    if(CHAT_WEATHER_KEYS.some(k => lower.includes(k))) return { type:'weather', location, explicitLocation };
+    if(CHAT_GUIDE_KEYS.some(k => lower.includes(k))) return { type:'guide', location, explicitLocation };
+    for(const cat of CHAT_CATEGORY_INTENTS){
+      if(cat.keys.some(k => lower.includes(k))) return { type:'places', query:cat.query, opener:cat.opener, location, explicitLocation };
+    }
+    // No specific category recognized — still genuinely useful: surface
+    // real things to do wherever the visitor is (or the city they named).
+    return { type:'places', query:'things to do', opener: loc => `Worth doing in ${escapeHtml(loc)}:`, location, explicitLocation };
+  }
+
+  async function buildChatReply(intent){
+    if(intent.type === 'greeting'){
+      return { text: `Happy to help, ${escapeHtml((state.profile.name||'').split(' ')[0] || 'there')}. Ask me about restaurants, things to do, the weather, or a destination.` };
+    }
+    if(intent.type === 'help'){
+      return { text: `I can pull real, live results for things like "good restaurants in Austin", "weather in Lisbon", "what's New York like", or "spa day near me". Tap any place I mention to see its full details and book it.` };
+    }
+    if(intent.type === 'weather'){
+      const data = await apiGet('/butler/weather?location=' + encodeURIComponent(intent.location));
+      if(!data.live) return { text: `I don't have live weather for ${escapeHtml(intent.location)} right now — that source isn't connected.` };
+      return { text: `Right now in ${escapeHtml(intent.location)}: <strong>${Math.round(data.tempF)}°F</strong>, ${escapeHtml(data.conditions || '')}.` };
+    }
+    if(intent.type === 'guide'){
+      const data = await apiGet('/butler/destination-guide?location=' + encodeURIComponent(intent.location));
+      if(!data.live || !data.extract) return { text: `I don't have a live guide for ${escapeHtml(intent.location)} yet.` };
+      const short = data.extract.length > 320 ? data.extract.slice(0,320).trim() + '…' : data.extract;
+      return { text: `${escapeHtml(short)}${data.url ? ` <a href="${data.url}" target="_blank" rel="noopener">Read more ${icon('arrow')}</a>` : ''}` };
+    }
+    // 'places'
+    const data = await apiGet(placesUrl(intent.query, intent.location));
+    if(!data.live || !(data.items||[]).length){
+      return { text: `I couldn't find live results for ${escapeHtml(intent.query)} in ${escapeHtml(intent.location)} right now.` };
+    }
+    const top = data.items.slice().sort((a,b) => (b.rating||0)-(a.rating||0)).slice(0,3);
+    top.forEach(p => { state.chatPlaceIndex[p.id] = p; });
+    const links = top.map(p => `<span class="chat-place-link" data-chat-place="${p.id}">${escapeHtml(p.title)}</span>${p.rating ? ` (${p.rating.toFixed(1)}★)` : ''}`).join(', ');
+    const opener = intent.opener ? intent.opener(intent.location) : `In ${escapeHtml(intent.location)}, I'd suggest`;
+    return { text: `${opener} ${links}. Tap a name for details, or ask me to book one.` };
+  }
+
+  async function sendChat(){
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
     if(!text) return;
-    const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-    state.messages.push({ from:'me', text, time:now });
-    state.messages.push({ from:'them', text:"BOS doesn't have a live chat backend connected yet, so this won't be seen. Try “Make a Request” instead — that calls the real backend.", time:now });
+    const now = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    state.messages.push({ from:'me', text: escapeHtml(text), time: now() });
     input.value = '';
+    const typingMsg = { from:'them', text:'Isabella is thinking...', time: now(), typing:true };
+    state.messages.push(typingMsg);
+    renderChatOnly();
+
+    const intent = parseChatIntent(text);
+    let reply;
+    try{
+      reply = await buildChatReply(intent);
+    }catch(err){
+      reply = { text: `I couldn't reach BOS's backend just now (${escapeHtml(err.message)}). Try again in a moment.` };
+    }
+    const idx = state.messages.indexOf(typingMsg);
+    if(idx !== -1) state.messages.splice(idx, 1, { from:'them', text: reply.text, time: now() });
     renderChatOnly();
   }
   function renderChatOnly(){
     const chatBox = document.getElementById('chatMessages');
     if(!chatBox) return;
     chatBox.innerHTML = state.messages.map(m => `
-      <div class="msg ${m.from==='me'?'me':'them'}">${m.text}<div class="msg-time">${m.time}</div></div>
+      <div class="msg ${m.from==='me'?'me':'them'}${m.typing?' typing':''}">${m.text}<div class="msg-time">${m.time}</div></div>
     `).join('');
     chatBox.scrollTop = chatBox.scrollHeight;
+    chatBox.querySelectorAll('[data-chat-place]').forEach(el => {
+      el.addEventListener('click', () => {
+        const item = state.chatPlaceIndex[el.dataset.chatPlace];
+        if(item) openDetail(normalizePlaceDetail(item));
+      });
+    });
   }
 
   /* ============ REQUEST MODAL ============ */
