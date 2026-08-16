@@ -684,7 +684,24 @@
   .modal textarea{ width:100%; border:1px solid var(--line); border-radius:12px; padding:12px 14px; font-family:'Inter',sans-serif; font-size:13.5px; resize:vertical; min-height:90px; outline:none; }
   .modal textarea:focus{ border-color:var(--gold); }
   .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
-  .btn-ghost{ background:none; border:1px solid var(--line); border-radius:999px; padding:10px 18px; font-size:13px; font-weight:600; cursor:pointer; color:var(--muted); }
+  .btn-ghost{ display:inline-flex; align-items:center; gap:6px; background:none; border:1px solid var(--line); border-radius:999px; padding:10px 18px; font-size:13px; font-weight:600; cursor:pointer; color:var(--muted); text-decoration:none; }
+  .btn-ghost:hover{ border-color:var(--gold); color:var(--ink); }
+  .btn-ghost svg{ width:13px; height:13px; }
+
+  .related-products-row{ display:flex; gap:14px; overflow-x:auto; padding-bottom:4px; }
+  .related-product-card{ flex:none; width:150px; }
+  .related-product-thumb{ width:150px; height:110px; border-radius:12px; margin-bottom:8px; }
+  .related-product-name{ font-size:12.5px; font-weight:600; line-height:1.3; margin-bottom:2px; }
+  .related-product-meta{ font-size:11px; color:var(--muted); margin-bottom:8px; }
+  .related-product-actions{ display:flex; align-items:center; gap:10px; }
+  .related-product-add{
+    display:flex; align-items:center; gap:4px;
+    background:var(--ink); color:#fff; border:none; border-radius:999px;
+    padding:6px 12px; font-size:11px; font-weight:600; cursor:pointer; font-family:inherit;
+  }
+  .related-product-add svg{ width:10px; height:10px; }
+  .related-product-actions a{ font-size:11px; font-weight:600; color:var(--muted); display:flex; align-items:center; gap:3px; text-decoration:none; }
+  .related-product-actions a svg{ width:10px; height:10px; }
 
   /* ---------- toast ---------- */
   .toast-stack{ position:fixed; bottom:24px; right:24px; display:flex; flex-direction:column; gap:10px; z-index:200; }
@@ -896,7 +913,8 @@
     detailReturnPage: 'home', // where the Back button on the detail page goes
     detailMap: { loading: false, lat: null, lon: null, live: false }, // real coordinates for the embedded map, via /butler/geocode
     detailBookingRequestId: null, // set once "Book Now" is clicked on the detail page, so its timeline can track the real request's live status
-    ipLocation: { city: null, loading: false, resolved: false }, // real city detected from the visitor's own IP address — see detectIpLocation()
+    ipLocation: { city: null, lat: null, lon: null, loading: false, resolved: false }, // real city + coordinates detected from the visitor's own IP address — see detectIpLocation()
+    detailProducts: { loading: false, items: [], live: false }, // real "Complete the Experience" product matches for the open detail item — see loadRelatedProducts()
   };
   let spotlightTimer = null; // rotation interval handle — module-level since it's not render state
 
@@ -1063,6 +1081,7 @@
   const PROVIDER_LABELS = {
     expedia:'Expedia', booking:'Booking.com', airbnb:'Airbnb', tripadvisor:'TripAdvisor',
     google_places:'Google Places', amadeus:'Amadeus', skyscanner:'Skyscanner', yelp:'Yelp',
+    bestbuy:'Best Buy', rakuten:'Rakuten', walmart:'Walmart', amazon:'Amazon',
   };
   function providerLabel(p){ return PROVIDER_LABELS[p] || p || 'BOS'; }
 
@@ -1144,12 +1163,14 @@
     state.detailItem = item;
     state.detailMap = { loading: false, lat: null, lon: null, live: false };
     state.detailBookingRequestId = null;
+    state.detailProducts = { loading: false, items: [], live: false };
     if(state.page !== 'detail') state.detailReturnPage = state.page;
     state.page = 'detail';
     stopSpotlightRotation();
     renderNav();
     renderPage();
     loadDetailMap();
+    loadRelatedProducts();
   }
   function closeDetail(){
     navigate(state.detailReturnPage || 'home');
@@ -1169,6 +1190,110 @@
     }finally{
       if(state.page === 'detail') renderPage();
     }
+  }
+
+  /* Real products related to whatever's open on the detail page — "Complete
+     the Experience". Queries /butler/products with the listing's own title
+     as the search term, so results (Best Buy's real catalog + Rakuten when
+     configured, each with a genuine photo/price) are actually relevant to
+     the thing being booked, not a generic shopping feed. Amazon has no
+     self-serve product-search API (see INTEGRATIONS.md), so it never
+     appears here even though its affiliate-link mechanism works elsewhere —
+     honestly empty rather than showing anything invented. */
+  async function loadRelatedProducts(){
+    const item = state.detailItem;
+    if(!item) return;
+    state.detailProducts = { loading: true, items: [], live: false };
+    if(state.page === 'detail') renderPage();
+    try{
+      const data = await apiGet('/butler/products?need=' + encodeURIComponent(item.title));
+      state.detailProducts = { loading: false, items: (data.items || []).filter(p => p.live), live: !!data.live };
+    }catch(err){
+      state.detailProducts = { loading: false, items: [], live: false };
+    }finally{
+      if(state.page === 'detail') renderPage();
+    }
+  }
+
+  /* Adds a product to the existing booking as a real follow-up request —
+     reuses submitRequest()/POST /butler/run rather than inventing a
+     separate "cart" concept, so it shows up in Requests exactly like any
+     other ask of Isabella's. */
+  function addProductToRequest(productId){
+    const item = state.detailItem;
+    const product = (state.detailProducts.items || []).find(p => p.id === productId);
+    if(!product) return;
+    const text = `Add to ${item ? item.title : 'my booking'}: ${product.name} (${product.retailer})`;
+    submitRequest(text);
+  }
+
+  function relatedProductsPanel(){
+    const dp = state.detailProducts;
+    if(!dp || dp.loading){
+      return `<div class="panel" style="margin-top:16px;"><div class="loading-state">Finding things to go with this...</div></div>`;
+    }
+    if(!dp.items.length) return ''; // honest: no live product match this time, nothing to show
+    return `
+      <div class="panel" style="margin-top:16px;">
+        <div class="panel-head"><h3>Complete the Experience</h3></div>
+        <div class="related-products-row">
+          ${dp.items.map(p => `
+            <div class="related-product-card">
+              <div class="related-product-thumb" style="${p.imageUrl ? `background-image:url('${p.imageUrl}');background-size:cover;background-position:center;` : `background:linear-gradient(160deg, var(--gold-soft), var(--gold));`}"></div>
+              <div class="related-product-name">${p.name}</div>
+              <div class="related-product-meta">$${p.price}${p.currency ? ' ' + p.currency : ''} · ${providerLabel(p.retailer)}</div>
+              <div class="related-product-actions">
+                <button class="related-product-add" data-add-product="${p.id}">${icon('plus')} Add</button>
+                ${p.affiliateLink ? `<a href="${p.affiliateLink}" target="_blank" rel="noopener">View ${icon('arrow')}</a>` : ''}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  /* Real ride deep links (Uber "setPickup" Universal Links / Lyft Universal
+     Links) built from a genuine pickup point (the visitor's IP-geolocated
+     coordinates) and a genuine dropoff point (this listing's geocoded
+     address). No API key or partner approval is needed for these — they
+     open Uber/Lyft's own app or web experience with the trip pre-filled.
+     Uber/Lyft's ride-BOOKING APIs are gated behind case-by-case partner
+     review (see INTEGRATIONS.md), so this is the honest, actually-working
+     way to "connect for a ride" without fabricating a live booking. */
+  function rideOptionsPanel(){
+    const item = state.detailItem;
+    const pickup = state.ipLocation;
+    const dropoff = state.detailMap;
+    if(!item) return '';
+    if(pickup.loading || dropoff.loading){
+      return `<div class="panel" style="margin-top:16px;"><div class="loading-state">Finding ride options...</div></div>`;
+    }
+    if(pickup.lat == null || dropoff.lat == null || !dropoff.live){
+      return ''; // honest: no real coordinates for pickup and/or dropoff yet — nothing to show
+    }
+    const uberParams = new URLSearchParams({
+      action: 'setPickup',
+      'pickup[latitude]': pickup.lat, 'pickup[longitude]': pickup.lon,
+      'pickup[formatted_address]': pickup.city || 'Current location',
+      'dropoff[latitude]': dropoff.lat, 'dropoff[longitude]': dropoff.lon,
+      'dropoff[formatted_address]': item.address || item.title,
+    });
+    const lyftParams = new URLSearchParams({
+      id: 'lyft',
+      'pickup[latitude]': pickup.lat, 'pickup[longitude]': pickup.lon,
+      'destination[latitude]': dropoff.lat, 'destination[longitude]': dropoff.lon,
+    });
+    return `
+      <div class="panel" style="margin-top:16px;">
+        <div class="panel-head"><h3>Need a Ride There?</h3></div>
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;">Opens with your pickup and this address pre-filled.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <a class="btn-ghost" href="https://m.uber.com/ul/?${uberParams.toString()}" target="_blank" rel="noopener">${icon('compass')} Request via Uber</a>
+          <a class="btn-ghost" href="https://ride.lyft.com/ride?${lyftParams.toString()}" target="_blank" rel="noopener">${icon('compass')} Request via Lyft</a>
+        </div>
+      </div>
+    `;
   }
 
   /* "Book Now" on the detail page — sends the same real request the rest
@@ -1248,6 +1373,8 @@
             <div class="detail-meta-row">${icon('sparkle')} Source: ${item.sourceLabel}${item.url ? ` · <a href="${item.url}" target="_blank" rel="noopener">View original ${icon('arrow')}</a>` : ''}</div>
           </div>
           ${detailMapPanel()}
+          ${rideOptionsPanel()}
+          ${relatedProductsPanel()}
         </div>
         <div class="detail-side">
           <div class="panel">
@@ -1938,6 +2065,10 @@
     const detailBookBtn = document.getElementById('detailBookBtn');
     if(detailBookBtn) detailBookBtn.addEventListener('click', () => bookFromDetail());
 
+    root.querySelectorAll('[data-add-product]').forEach(el => {
+      el.addEventListener('click', () => addProductToRequest(el.dataset.addProduct));
+    });
+
     const chatSend = document.getElementById('chatSend');
     const chatInput = document.getElementById('chatInput');
     if(chatSend){
@@ -2090,20 +2221,24 @@
     // always prefers an explicit favorite location over this regardless.
     state.ipLocation = Object.assign({}, state.ipLocation, { loading: true });
     try{
-      let city = null;
+      let city = null, lat = null, lon = null;
       try{
         const res = await fetch('https://ipapi.co/json/');
         const data = await res.json();
         city = data && data.city ? data.city : null;
+        lat = data && typeof data.latitude === 'number' ? data.latitude : null;
+        lon = data && typeof data.longitude === 'number' ? data.longitude : null;
       }catch(err){ /* fall through to backup provider */ }
       if(!city){
         const res2 = await fetch('https://ipwho.is/');
         const data2 = await res2.json();
         city = data2 && data2.success && data2.city ? data2.city : null;
+        lat = data2 && typeof data2.latitude === 'number' ? data2.latitude : null;
+        lon = data2 && typeof data2.longitude === 'number' ? data2.longitude : null;
       }
-      state.ipLocation = { city, loading: false, resolved: true };
+      state.ipLocation = { city, lat, lon, loading: false, resolved: true };
     }catch(err){
-      state.ipLocation = { city: null, loading: false, resolved: true };
+      state.ipLocation = { city: null, lat: null, lon: null, loading: false, resolved: true };
     }
   }
 
