@@ -259,6 +259,8 @@
     box-shadow:var(--shadow-md);
     margin-bottom:30px;
   }
+  .spotlight-weather-note{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); margin:0 0 14px; }
+  .spotlight-weather-note svg{ width:14px; height:14px; color:var(--gold); flex:none; }
   .hero-copy{ padding:44px 40px; display:flex; flex-direction:column; justify-content:center; }
   .hero-copy .eyebrow{ font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--gold); font-weight:600; margin-bottom:14px;}
   .hero-copy h1{
@@ -376,6 +378,15 @@
     display:flex; flex-direction:column; justify-content:flex-end; padding:24px 26px; color:#fff; margin-bottom:20px;
   }
   .detail-hero .badge{ display:inline-block; background:rgba(255,255,255,0.92); color:var(--ink); font-size:9.5px; font-weight:700; letter-spacing:0.08em; padding:4px 9px; border-radius:6px; margin-bottom:10px; width:fit-content; }
+  .detail-save-btn{
+    position:absolute; top:18px; right:18px; width:38px; height:38px; border-radius:50%; border:none;
+    background:rgba(20,16,10,0.45); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center;
+    cursor:pointer; padding:0; transition:background .15s ease, transform .15s ease;
+  }
+  .detail-save-btn:hover{ transform:scale(1.06); }
+  .detail-save-btn svg{ width:18px; height:18px; color:#fff; fill:none; }
+  .detail-save-btn.is-saved{ background:var(--gold); }
+  .detail-save-btn.is-saved svg{ fill:#fff; color:#fff; }
   .detail-hero h2{ font-family:'Fraunces', serif; font-weight:500; font-size:28px; margin:0 0 6px; line-height:1.2; }
   .detail-grid{ display:grid; grid-template-columns:2fr 1fr; gap:20px; align-items:start; }
   @media (max-width:860px){ .detail-grid{ grid-template-columns:1fr; } }
@@ -604,7 +615,7 @@
   .place-card:hover{ transform:translateY(-3px); box-shadow:var(--shadow-md); }
   .pc-media{
     width:100%; aspect-ratio:4/3; background-color:var(--gold-softer); background-size:cover; background-position:center;
-    display:flex; align-items:center; justify-content:center; flex:none;
+    display:flex; align-items:center; justify-content:center; flex:none; position:relative;
   }
   .pc-fallback{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
   .pc-fallback svg{ width:28px; height:28px; color:var(--gold); }
@@ -614,6 +625,38 @@
   .pc-rating svg{ width:12px; height:12px; }
   .pc-count{ color:var(--muted-2); font-weight:500; }
   .pc-desc{ margin:2px 0 0; font-size:12.5px; color:var(--muted); line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .pc-meta-row{ display:flex; align-items:center; gap:8px; font-size:11.5px; }
+  .pc-price{ color:var(--muted); font-weight:700; }
+  .pc-open{ font-weight:600; padding:2px 8px; border-radius:999px; font-size:10.5px; text-transform:uppercase; letter-spacing:0.03em; }
+  .pc-open.is-open{ background:#E3EFE2; color:#3E7A46; }
+  .pc-open.is-closed{ background:#F3E5E3; color:#B8544A; }
+  .pc-save-btn{
+    position:absolute; top:8px; right:8px; width:30px; height:30px; border-radius:50%; border:none;
+    background:rgba(20,16,10,0.45); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center;
+    cursor:pointer; padding:0; transition:background .15s ease, transform .15s ease;
+  }
+  .pc-save-btn:hover{ transform:scale(1.08); }
+  .pc-save-btn svg{ width:15px; height:15px; color:#fff; fill:none; }
+  .pc-save-btn.is-saved{ background:var(--gold); }
+  .pc-save-btn.is-saved svg{ fill:#fff; color:#fff; }
+  .cat-opennow-toggle{ display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); white-space:nowrap; cursor:pointer; }
+  .cat-opennow-toggle input{ width:14px; height:14px; cursor:pointer; }
+  .saved-places-list{ display:flex; flex-direction:column; gap:10px; }
+  .saved-place-row{
+    display:flex; align-items:center; gap:12px; padding:8px; border:1px solid var(--line); border-radius:12px;
+    cursor:pointer; transition:background .15s ease;
+  }
+  .saved-place-row:hover{ background:var(--gold-softer); }
+  .saved-place-thumb{
+    width:52px; height:52px; border-radius:9px; flex:none; background-color:var(--gold-softer);
+    background-size:cover; background-position:center; display:flex; align-items:center; justify-content:center;
+  }
+  .saved-place-thumb svg{ width:20px; height:20px; color:var(--gold); }
+  .saved-place-info{ flex:1; min-width:0; }
+  .saved-place-title{ font-size:13.5px; font-weight:600; }
+  .saved-place-addr{ font-size:11.5px; color:var(--muted-2); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .saved-place-row .footer-link{ flex:none; }
+  .saved-place-row .footer-link svg{ width:14px; height:14px; }
   /* Invisible trigger — auto-loads the next page of real results the
      moment it scrolls into view, so browsing never needs a manual "Load
      more" click. .load-more-status is the small text shown mid-fetch. */
@@ -1021,6 +1064,8 @@
     categoryPlaces: {}, // { [navKey]: { live, items, loading, loadingMore, location, query, nextPageToken } } — populated from /butler/places (Google Places), used by the "focused" single-list view
     categoryFilter: {}, // { [navKey]: selectedQueryString } — which refine chip (or custom search) is active per category, in focused view
     categorySort: {}, // { [navKey]: 'relevance' | 'rating' } — client-side display sort over whatever's loaded
+    categoryOpenNow: {}, // { [navKey]: boolean } — client-side "Open Now" filter over whatever's loaded, using Google's real currentOpeningHours.openNow
+    savedPlaces: [], // [{ id, title, address, category, photoName, rating }] — persisted to the user's profile preferences (see saveProfile/loadUser)
     categoryViewMode: {}, // { [navKey]: 'groups' | 'focused' } — default 'groups': every sub-category shown as its own live section at once. 'focused' (via a chip, "See all", or search): one sub-category, full list, auto-loading.
     categoryGroups: {}, // { [navKey]: [{ loading, items, live }, ...] } — parallel to CATEGORY_FILTERS[navKey], one real live result set per sub-category, for the grouped browse view
     categoryGroupsKey: {}, // { [navKey]: geoCacheKey } — what location/precision categoryGroups[navKey] was last loaded for
@@ -1058,10 +1103,12 @@
     { key:'travel', label:'Travel', icon:'plane' },
     { key:'dining', label:'Dining', icon:'fork' },
     { key:'wellness', label:'Wellness', icon:'heart' },
-    { key:'finance', label:'Finance', icon:'wallet' },
+    // Finance temporarily pulled from the nav per request — pageFinance()
+    // and its data loading are left intact so it's a one-line revert.
     { key:'calendar', label:'Calendar', icon:'calendar' },
     { key:'events', label:'Events', icon:'ticket' },
-    { key:'requests', label:'Requests', icon:'inbox' },
+    // Requests temporarily pulled from the nav per request — pageRequests()
+    // and submitRequest() are left intact so it's a one-line revert.
     { key:'messages', label:'Messages', icon:'chat', badge:true },
     { key:'profile', label:'Profile', icon:'user' },
   ];
@@ -1238,6 +1285,7 @@
   function normalizePlaceDetail(raw){
     return {
       kind: 'place',
+      id: raw.id,
       title: raw.title,
       badgeLabel: (raw.categoryKey && SPOTLIGHT_CATEGORY_LABEL[raw.categoryKey]) || 'Live Pick',
       photoName: raw.photoName || null,
@@ -1254,6 +1302,8 @@
       currency: raw.currency || null,
       websiteUri: raw.websiteUri || null,
       phone: raw.phone || null,
+      priceLevel: raw.priceLevel || null,
+      openNow: typeof raw.openNow === 'boolean' ? raw.openNow : null,
     };
   }
   function normalizeCuratedDetail(card){
@@ -1306,6 +1356,14 @@
     }
     if(state.homeSpotlight && state.homeSpotlight.items){
       const found = state.homeSpotlight.items.find(p => p.id === id);
+      if(found) return found;
+    }
+    // Fall back to the visitor's saved list — this covers reopening a
+    // saved place's detail page from Profile without it being in any
+    // currently-loaded category cache. Only the fields we actually stored
+    // at save time are shown; nothing is backfilled or invented.
+    if(state.savedPlaces){
+      const found = state.savedPlaces.find(p => String(p.id) === String(id));
       if(found) return found;
     }
     return null;
@@ -1465,15 +1523,21 @@
   /* Reflects the real, current status of the request created by
      bookFromDetail() (if any) — 'progress' while /butler/run is in
      flight, then 'confirmed' or 'received' (backend unreachable) once it
-     resolves. Before a booking is made, every step just sits inactive. */
+     resolves. Before a booking is made, every step just sits inactive.
+     Labels are deliberately honest about what actually happened: BOS logs
+     and processes the request internally, but nothing here contacts the
+     business or secures an actual reservation — that's the whole reason
+     Reserve Directly (real website/phone) exists as a separate, primary
+     path when Google gives us one. "Confirmed" below means "Isabella has
+     it," not "the table is booked." */
   function bookingTimeline(){
     const reqId = state.detailBookingRequestId;
     const req = reqId ? state.requests.find(r => r.id === reqId) : null;
     const status = req ? req.status : null;
     const steps = [
-      { label:'Request Sent', done: !!req, active: false },
-      { label:'Isabella Reviews & Confirms', done: status === 'confirmed', active: status === 'progress' },
-      { label: status === 'received' ? 'Backend Unreachable — Saved Locally' : 'Booking Confirmed', done: status === 'confirmed', active: false },
+      { label:'Request Sent to Isabella', done: !!req, active: false },
+      { label:'Isabella Processes It', done: status === 'confirmed', active: status === 'progress' },
+      { label: status === 'received' ? 'Backend Unreachable — Saved Locally' : 'Logged With Isabella', done: status === 'confirmed', active: false },
     ];
     return `
       <div class="timeline">
@@ -1532,6 +1596,7 @@
       <button class="footer-link" id="detailBackBtn" style="margin-bottom:16px;">${icon('arrow','detail-back-arrow')} Back</button>
       <div class="detail-hero"${img ? ` style="background-image:linear-gradient(180deg, rgba(20,16,10,0.05) 40%, rgba(20,16,10,0.78)), url('${img}')"` : ''}>
         <span class="badge">${(item.badgeLabel||'').toUpperCase()}</span>
+        ${item.kind === 'place' && item.id ? `<button class="detail-save-btn ${isPlaceSaved(item.id) ? 'is-saved' : ''}" id="detailSaveBtn" title="${isPlaceSaved(item.id) ? 'Remove from Saved' : 'Save this place'}">${icon('heart')}</button>` : ''}
         <h2>${item.title}</h2>
         ${item.rating ? `<div class="spotlight-rating">${icon('star','sp-star')} ${item.rating.toFixed(1)}${item.userRatingCount ? ` <span>(${item.userRatingCount})</span>` : ''}</div>` : ''}
       </div>
@@ -1544,6 +1609,8 @@
               : `<div class="empty-state" style="padding:6px 0;">No description available.</div>`}
             ${item.address ? `<div class="detail-meta-row">${icon('compass')} ${item.address}</div>` : (item.locationLabel ? `<div class="detail-meta-row">${icon('compass')} ${item.locationLabel}</div>` : '')}
             ${item.price != null ? `<div class="detail-meta-row">${icon('wallet')} ~$${item.price}${item.currency ? ' ' + item.currency : ''}</div>` : ''}
+            ${item.priceLevel && PRICE_LEVEL_LABEL[item.priceLevel] ? `<div class="detail-meta-row">${icon('wallet')} Price level: ${PRICE_LEVEL_LABEL[item.priceLevel]}</div>` : ''}
+            ${typeof item.openNow === 'boolean' ? `<div class="detail-meta-row">${icon('compass')} <span class="pc-open ${item.openNow?'is-open':'is-closed'}" style="margin-left:2px;">${item.openNow ? 'Open now' : 'Closed now'}</span></div>` : ''}
             <div class="detail-meta-row">${icon('sparkle')} Source: ${item.sourceLabel}${item.url ? ` · <a href="${item.url}" target="_blank" rel="noopener">View original ${icon('arrow')}</a>` : ''}</div>
           </div>
           ${detailMapPanel()}
@@ -1551,19 +1618,23 @@
           ${relatedProductsPanel()}
         </div>
         <div class="detail-side">
-          ${(item.websiteUri || item.phone) ? `
+          ${(item.websiteUri || item.phone || item.address) ? `
             <div class="panel" style="margin-bottom:16px;">
               <div class="panel-head"><h3>Reserve Directly</h3></div>
               <p style="font-size:12.5px;color:var(--muted);line-height:1.5;margin-bottom:12px;">Real contact info from Google — go straight to them, no middleman.</p>
               ${item.websiteUri ? `<a class="btn-ghost" href="${item.websiteUri}" target="_blank" rel="noopener" style="width:100%;justify-content:center;margin-bottom:8px;">${icon('sparkle')} Visit Website</a>` : ''}
-              ${item.phone ? `<a class="btn-ghost" href="tel:${item.phone.replace(/[^+\d]/g,'')}" style="width:100%;justify-content:center;">${icon('phone')} Call ${item.phone}</a>` : ''}
+              ${item.phone ? `<a class="btn-ghost" href="tel:${item.phone.replace(/[^+\d]/g,'')}" style="width:100%;justify-content:center;margin-bottom:8px;">${icon('phone')} Call ${item.phone}</a>` : ''}
+              ${item.address ? `<a class="btn-ghost" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(item.address)}" target="_blank" rel="noopener" style="width:100%;justify-content:center;">${icon('compass')} Get Directions</a>` : ''}
             </div>
           ` : ''}
           <div class="panel">
-            <div class="panel-head"><h3>Booking Timeline</h3></div>
+            <div class="panel-head"><h3>${(item.websiteUri || item.phone) ? 'Or, Have Isabella Handle It' : 'Send a Request to Isabella'}</h3></div>
+            <p style="font-size:12.5px;color:var(--muted);line-height:1.5;margin-bottom:10px;">${(item.websiteUri || item.phone)
+              ? 'Prefer not to call or visit the site yourself? This logs the request with Isabella instead — it does not contact the business directly.'
+              : 'No direct contact info came back for this one. Isabella will log your request and follow up — this does not contact the business directly.'}</p>
             ${bookingTimeline()}
-            <button class="btn-primary" id="detailBookBtn" style="width:100%;justify-content:center;margin-top:14px;" ${state.detailBookingRequestId ? 'disabled' : ''}>
-              ${state.detailBookingRequestId ? 'Request Sent' : 'Ask Isabella to Book It'} ${icon('arrow')}
+            <button class="btn-${(item.websiteUri || item.phone) ? 'ghost' : 'primary'}" id="detailBookBtn" style="width:100%;justify-content:center;margin-top:14px;" ${state.detailBookingRequestId ? 'disabled' : ''}>
+              ${state.detailBookingRequestId ? 'Request Sent' : 'Ask Isabella to Handle It'} ${icon('arrow')}
             </button>
           </div>
         </div>
@@ -1697,7 +1768,13 @@
             ? `<div class="place-grid">${stays.slice(0,4).map(s => `
                 <div class="place-card"><div class="pc-body"><div class="pc-title">${s.title}</div><p class="pc-desc">$${s.price}${s.currency?' '+s.currency:''} · ${providerLabel(s.provider)}</p></div></div>
               `).join('')}</div>`
-            : `<div class="empty-state">Not connected — Booking.com and Airbnb don't offer a self-serve booking API (see the app's INTEGRATIONS notes), so this stays honestly empty rather than showing fake listings.</div>`}
+            : `<div class="stays-fallback">
+                <p style="font-size:12.5px;color:var(--muted);line-height:1.5;margin-bottom:12px;">Booking.com and Airbnb don't offer a self-serve API, so BOS can't pull live listings here — these go straight to their real search results for ${escapeHtml(wp.location)}, no middleman.</p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <a class="btn-ghost" href="https://www.booking.com/searchresults.html?ss=${encodeURIComponent(wp.location)}" target="_blank" rel="noopener">${icon('sparkle')} Search Booking.com</a>
+                  <a class="btn-ghost" href="https://www.airbnb.com/s/${encodeURIComponent(wp.location)}/homes" target="_blank" rel="noopener">${icon('sparkle')} Search Airbnb</a>
+                </div>
+              </div>`}
           <button class="footer-link" id="replanWeekend" style="margin-top:16px;">Plan a different weekend ${icon('arrow')}</button>
         </div>
       `;
@@ -1758,6 +1835,9 @@
 
       <div id="weekendPlanSlot">${weekendPlanPanel()}</div>
 
+      ${state.homeSpotlight && state.homeSpotlight.weatherBias ? `
+        <p class="spotlight-weather-note">${icon('sun')} Because ${state.homeSpotlight.weatherBias.reason}, we're leading with ${state.homeSpotlight.weatherBias.mode === 'indoor' ? 'cozy indoor' : 'outdoor'} picks today.</p>
+      ` : ''}
       <div id="spotlightSlot">${spotlightCarousel()}</div>
 
       <section class="section">
@@ -1837,12 +1917,38 @@
     return `<div class="empty-state">${s && s.loading ? 'Finding live picks…' : 'No picks yet.'}</div>`;
   }
 
+  /* Reads the real, already-live weather (state.weather, from
+     OpenWeather/NWS/Open-Meteo) and turns it into a gentle category bias —
+     never a fabricated "forecast says" claim, just a plain read of the
+     genuine current conditions/temperature already on screen in the hero
+     widget. Returns null (no bias) for ordinary, unremarkable weather. */
+  const INDOOR_SPOTLIGHT_CATS = ['wellness', 'dining'];
+  const OUTDOOR_SPOTLIGHT_CATS = ['lifestyle', 'travel'];
+  function weatherBias(){
+    const w = state.weather;
+    if(!w || !w.conditions) return null;
+    const c = w.conditions.toLowerCase();
+    const temp = typeof w.tempF === 'number' ? w.tempF : null;
+    const rough = /rain|storm|snow|shower|drizzle|thunder|sleet|hail/.test(c);
+    const coldExtreme = temp != null && temp <= 35;
+    const hotExtreme = temp != null && temp >= 95;
+    if(rough) return { mode:'indoor', reason:`it's ${c} out` };
+    if(coldExtreme) return { mode:'indoor', reason:`it's only ${Math.round(temp)}°F` };
+    if(hotExtreme) return { mode:'indoor', reason:`it's ${Math.round(temp)}°F out` };
+    const pleasant = /clear|sunny|partly|fair/.test(c) && temp != null && temp >= 55 && temp <= 85;
+    if(pleasant) return { mode:'outdoor', reason:`it's ${c}, ${Math.round(temp)}°F` };
+    return null;
+  }
+
   /* ============ HOME SPOTLIGHT (live, rotating) ============
      Pulls the default query for every category (Lifestyle/Travel/Dining/
      Wellness) from /butler/places, merges the real results, and surfaces
      the highest-rated, best-photographed ones as an auto-rotating hero
      spotlight — genuinely different places each time it refreshes, never
-     invented copy. */
+     invented copy. When today's real weather is rough or extreme, indoor
+     categories (Wellness/Dining) get a small ranking nudge over outdoor
+     ones (and vice versa on a genuinely nice day) — a nudge, not a
+     filter, so a 4.9★ outdoor pick still beats a mediocre indoor one. */
   async function loadHomeSpotlight(){
     const location = currentLocation();
     const locationKey = geoCacheKey(location);
@@ -1863,12 +1969,18 @@
           (r.items || []).slice(0, 6).forEach(item => merged.push(Object.assign({ categoryKey: navKeys[i] }, item)));
         }
       });
-      merged.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      const bias = weatherBias();
+      const biasScore = (m) => {
+        if(!bias) return 0;
+        const cats = bias.mode === 'indoor' ? INDOOR_SPOTLIGHT_CATS : OUTDOOR_SPOTLIGHT_CATS;
+        return cats.includes(m.categoryKey) ? 0.4 : 0;
+      };
+      merged.sort((a, b) => ((b.rating || 0) + biasScore(b)) - ((a.rating || 0) + biasScore(a)));
       const withPhotos = merged.filter(m => m.photoName);
       const withoutPhotos = merged.filter(m => !m.photoName);
       const items = withPhotos.concat(withoutPhotos).slice(0, 10);
       const live = items.length > 0;
-      state.homeSpotlight = { live, items, loading: false, location, locationKey };
+      state.homeSpotlight = { live, items, loading: false, location, locationKey, weatherBias: bias };
       state.spotlightIndex = 0;
       if(live) state.live = true;
     }catch(err){
@@ -2061,6 +2173,7 @@
     const isCustomQuery = !filters.some(f => f.query === selectedQuery);
     const data = state.categoryPlaces[navKey];
     const sort = state.categorySort[navKey] || 'relevance';
+    const openNowOnly = !!state.categoryOpenNow[navKey];
 
     const chips = `
       <div class="filter-chips">
@@ -2076,6 +2189,9 @@
           <option value="relevance" ${sort!=='rating'?'selected':''}>Sort: Relevance</option>
           <option value="rating" ${sort==='rating'?'selected':''}>Sort: Highest Rated</option>
         </select>
+        <label class="cat-opennow-toggle">
+          <input type="checkbox" data-category-opennow="${navKey}" ${openNowOnly?'checked':''} /> Open now
+        </label>
       </div>
     `;
 
@@ -2085,16 +2201,17 @@
     } else if(!data || !data.live || !data.items.length){
       body = `<div class="empty-state">No live results yet for ${currentLocation()}.</div>`;
     } else {
-      const items = sort === 'rating' ? [...data.items].sort((a,b) => (b.rating||0) - (a.rating||0)) : data.items;
-      body = `
+      let items = openNowOnly ? data.items.filter(i => i.openNow === true) : data.items;
+      items = sort === 'rating' ? [...items].sort((a,b) => (b.rating||0) - (a.rating||0)) : items;
+      body = items.length ? `
         <div class="place-grid">
           ${items.map(placeCard).join('')}
         </div>
         ${data.loadingMore ? `<div class="load-more-status">Loading more…</div>` : ''}
-        ${data.nextPageToken && !data.loadingMore ? `
+        ${data.nextPageToken && !data.loadingMore && !openNowOnly ? `
           <div class="load-more-sentinel" data-loadmore-cat="${navKey}" data-loadmore-token="${data.nextPageToken}"></div>
         ` : ''}
-      `;
+      ` : `<div class="empty-state">Nothing currently open matches — try turning off "Open now" or loading more first.</div>`;
     }
 
     return `
@@ -2115,19 +2232,73 @@
      browser), rating, and a genuine description or address pulled straight
      from Google Places — never fabricated copy. Falls back to a plain
      icon tile if Google has no photo for this place. */
+  /* Saved places — persisted to the user's real profile preferences (PUT
+     /user/:id), so a save made on one visit is still there next time,
+     same as favoriteLocations. Never fabricated: only ever holds places
+     the visitor actually saved, built from genuine Google Places fields. */
+  function isPlaceSaved(id){
+    return (state.savedPlaces || []).some(s => String(s.id) === String(id));
+  }
+  function toggleSavePlace(item){
+    if(!item || !item.id) return;
+    const list = state.savedPlaces || [];
+    const idx = list.findIndex(s => String(s.id) === String(item.id));
+    if(idx >= 0){
+      state.savedPlaces = list.slice(0, idx).concat(list.slice(idx + 1));
+    } else {
+      state.savedPlaces = list.concat([{
+        id: item.id,
+        title: item.title,
+        address: item.address || item.locationLabel || null,
+        category: item.category || item.badgeLabel || null,
+        photoName: item.photoName || null,
+        rating: item.rating || null,
+        userRatingCount: item.userRatingCount || null,
+        url: item.url || null,
+        savedAt: new Date().toISOString(),
+      }]);
+      toast('Saved.');
+    }
+    persistSavedPlaces();
+    renderPage();
+  }
+  async function persistSavedPlaces(){
+    try{
+      await apiPut('/user/' + USER_ID, { preferences: { savedPlaces: state.savedPlaces } });
+    }catch(err){
+      toast("Saved locally — couldn't sync to your account.", { warn:true });
+    }
+  }
+  const PRICE_LEVEL_LABEL = {
+    PRICE_LEVEL_FREE: 'Free',
+    PRICE_LEVEL_INEXPENSIVE: '$',
+    PRICE_LEVEL_MODERATE: '$$',
+    PRICE_LEVEL_EXPENSIVE: '$$$',
+    PRICE_LEVEL_VERY_EXPENSIVE: '$$$$',
+  };
   function placeCard(p){
     const img = p.photoName ? `${API_BASE}/butler/photo?name=${encodeURIComponent(p.photoName)}&w=500` : '';
     const rating = p.rating ? `
       <div class="pc-rating">${icon('star','pc-star')} ${p.rating.toFixed(1)}${p.userRatingCount ? `<span class="pc-count"> (${p.userRatingCount})</span>` : ''}</div>
     ` : '';
     const desc = p.description || p.address || '';
+    const priceLabel = PRICE_LEVEL_LABEL[p.priceLevel] || '';
+    const meta = (priceLabel || typeof p.openNow === 'boolean') ? `
+      <div class="pc-meta-row">
+        ${priceLabel ? `<span class="pc-price">${priceLabel}</span>` : ''}
+        ${typeof p.openNow === 'boolean' ? `<span class="pc-open ${p.openNow ? 'is-open' : 'is-closed'}">${p.openNow ? 'Open now' : 'Closed now'}</span>` : ''}
+      </div>
+    ` : '';
+    const saved = isPlaceSaved(p.id);
     const inner = `
       <div class="pc-media"${img ? ` style="background-image:url('${img}')"` : ''}>
         ${!img ? `<div class="pc-fallback">${icon('compass')}</div>` : ''}
+        <button class="pc-save-btn ${saved ? 'is-saved' : ''}" data-save-place="${p.id}" title="${saved ? 'Remove from Saved' : 'Save this place'}">${icon('heart')}</button>
       </div>
       <div class="pc-body">
         <div class="pc-title">${p.title}</div>
         ${rating}
+        ${meta}
         ${desc ? `<p class="pc-desc">${desc}</p>` : ''}
       </div>
     `;
@@ -2181,10 +2352,11 @@
           ${state.myEvents.items.slice(0,5).map(e => `
             <div class="mini-event-row">
               <div class="mini-event-thumb" style="${e.imageUrl ? `background-image:url('${e.imageUrl}');` : ''}"></div>
-              <div>
+              <div style="flex:1;">
                 <div class="mini-event-title">${e.title}</div>
                 <div class="mini-event-meta">${eventDateLabel(e.start)}${e.venueName ? ` · ${e.venueName}` : ''}</div>
               </div>
+              ${e.start ? `<button class="footer-link" data-add-to-cal="${e.id}" title="Add to your BOS calendar">${icon('plus')}</button>` : ''}
             </div>
           `).join('')}
           <button class="footer-link" data-nav="events" style="margin-top:12px;">See All Events ${icon('arrow')}</button>
@@ -2373,10 +2545,37 @@
           <h3>${e.title}</h3>
           <div class="event-venue">${icon('compass')} ${e.venueName || e.address || 'Venue TBA'}</div>
           ${e.description ? `<p class="event-desc">${e.description.length > 160 ? e.description.slice(0,160).trim() + '…' : e.description}</p>` : ''}
-          ${e.url ? `<a class="btn-ghost" href="${e.url}" target="_blank" rel="noopener">${icon('ticket')} Get Tickets</a>` : ''}
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;">
+            ${e.url ? `<a class="btn-ghost" href="${e.url}" target="_blank" rel="noopener">${icon('ticket')} Get Tickets</a>` : ''}
+            ${e.start ? `<button class="btn-ghost" data-add-to-cal="${e.id}">${icon('plus')} Add to Calendar</button>` : ''}
+          </div>
         </div>
       </article>
     `;
+  }
+  /* Pushes a real event (Ticketmaster city search or the visitor's own
+     Eventbrite org) into the actual BOS calendar — same POST
+     /butler/calendar-event a manually-added event uses, just pre-filled
+     from genuine event data instead of typed in by hand. This is how the
+     Calendar page actually gets populated with real content rather than
+     staying empty until someone manually types events in one at a time. */
+  async function addEventToCalendar(e){
+    if(!e || !e.start){ toast("This event doesn't have a start time to add.", { warn:true }); return; }
+    const start = new Date(e.start);
+    const end = e.end ? new Date(e.end) : new Date(start.getTime() + 2*60*60*1000);
+    const location = e.venueName || e.address || undefined;
+    try{
+      await apiPost('/butler/calendar-event', {
+        userId: USER_ID, title: e.title, start: start.toISOString(), end: end.toISOString(),
+        location, type: 'travel',
+      });
+      toast('Added to your calendar.');
+      await loadCalendar();
+    }catch(err){
+      state.events.push({ day: dayLabelFor(start.toISOString()), time: timeLabelFor(start.toISOString()), title: e.title, sub: location || 'Added by you (offline)' });
+      renderPage();
+      toast('Added locally — backend unreachable (' + err.message + ').', { warn:true });
+    }
   }
 
   function pageEvents(){
@@ -2414,7 +2613,22 @@
     `;
   }
 
+  function savedPlaceRow(s){
+    const img = s.photoName ? `${API_BASE}/butler/photo?name=${encodeURIComponent(s.photoName)}&w=200` : '';
+    return `
+      <div class="saved-place-row" data-place-id="${s.id}">
+        <div class="saved-place-thumb"${img ? ` style="background-image:url('${img}')"` : ''}>${!img ? icon('compass') : ''}</div>
+        <div class="saved-place-info">
+          <div class="saved-place-title">${s.title}</div>
+          ${s.rating ? `<div class="pc-rating">${icon('star','pc-star')} ${s.rating.toFixed(1)}${s.userRatingCount ? `<span class="pc-count"> (${s.userRatingCount})</span>` : ''}</div>` : ''}
+          ${s.address ? `<div class="saved-place-addr">${s.address}</div>` : ''}
+        </div>
+        <button class="footer-link" data-unsave-place="${s.id}" title="Remove from Saved">${icon('close')}</button>
+      </div>
+    `;
+  }
   function pageProfile(){
+    const saved = state.savedPlaces || [];
     return `
       <div class="page-head">
         <div class="eyebrow">Account</div>
@@ -2450,6 +2664,12 @@
 
           <button class="btn-primary" id="saveProfile" style="margin-top:20px;">Save Changes</button>
         </div>
+      </div>
+      <div class="panel" style="margin-top:20px;">
+        <div class="panel-head"><h3>Saved Places</h3>${saved.length ? `<span class="conn-pill live">${saved.length} saved</span>` : ''}</div>
+        ${saved.length
+          ? `<div class="saved-places-list">${saved.slice().reverse().map(savedPlaceRow).join('')}</div>`
+          : `<div class="empty-state">Nothing saved yet — tap the heart on any place card or detail page to keep it here.</div>`}
       </div>
     `;
   }
@@ -2645,6 +2865,31 @@
         if(item) openDetail(normalizePlaceDetail(item));
       });
     });
+    root.querySelectorAll('[data-save-place]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const item = findPlaceItemById(el.dataset.savePlace) || (state.savedPlaces||[]).find(s => String(s.id) === el.dataset.savePlace);
+        if(item) toggleSavePlace(item);
+      });
+    });
+    root.querySelectorAll('[data-unsave-place]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const saved = (state.savedPlaces||[]).find(s => String(s.id) === el.dataset.unsavePlace);
+        if(saved) toggleSavePlace(saved);
+      });
+    });
+    root.querySelectorAll('[data-category-opennow]').forEach(el => {
+      el.addEventListener('change', () => setCategoryOpenNow(el.dataset.categoryOpennow, el.checked));
+    });
+    root.querySelectorAll('[data-add-to-cal]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = el.dataset.addToCal;
+        const ev = (state.cityEvents.items||[]).find(x => String(x.id) === id) || (state.myEvents.items||[]).find(x => String(x.id) === id);
+        if(ev) addEventToCalendar(ev);
+      });
+    });
     root.querySelectorAll('[data-open-pick]').forEach(el => {
       el.addEventListener('click', () => {
         const req = state.requests.find(r => String(r.id) === el.dataset.openPick);
@@ -2655,6 +2900,8 @@
     if(detailBackBtn) detailBackBtn.addEventListener('click', () => closeDetail());
     const detailBookBtn = document.getElementById('detailBookBtn');
     if(detailBookBtn) detailBookBtn.addEventListener('click', () => bookFromDetail());
+    const detailSaveBtn = document.getElementById('detailSaveBtn');
+    if(detailSaveBtn) detailSaveBtn.addEventListener('click', () => { if(state.detailItem) toggleSavePlace(state.detailItem); });
 
     root.querySelectorAll('[data-add-product]').forEach(el => {
       el.addEventListener('click', () => addProductToRequest(el.dataset.addProduct));
@@ -3214,6 +3461,15 @@
     renderPage();
   }
 
+  /* Also purely a display filter over whatever's already loaded — uses
+     Google's real currentOpeningHours.openNow, which is only present on
+     some results, so items with unknown hours are excluded rather than
+     assumed open or closed. */
+  function setCategoryOpenNow(navKey, checked){
+    state.categoryOpenNow[navKey] = checked;
+    renderPage();
+  }
+
   /* Called when a refine chip is clicked in the focused view — switches
      the live query for that category and reloads real results from
      scratch (fresh location, fresh pagination). */
@@ -3276,6 +3532,7 @@
         budgetBand: (user.preferences||{}).budgetBand || state.profile.budgetBand,
         favoriteLocations: (user.preferences||{}).favoriteLocations || state.profile.favoriteLocations,
       });
+      state.savedPlaces = (user.preferences||{}).savedPlaces || state.savedPlaces;
       state.live = true;
       renderGreeting();
       if(state.page === 'profile') renderPage();
@@ -3302,12 +3559,40 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   }
   const CHAT_CATEGORY_INTENTS = [
-    { key:'dining', keys:['restaurant','dinner','lunch','brunch','eat','food','cuisine','dining','coffee','cafe','café','bar','drinks','hungry','date night','breakfast'], query:'restaurants', label:'Dining' },
-    { key:'wellness', keys:['spa','massage','yoga','wellness','relax','meditation','gym','fitness','tired','stressed','stressed out','need to unwind','recharge'], query:'spa and wellness', label:'Wellness' },
-    { key:'activities', keys:['museum','gallery','art','attraction','sightsee','activity','activities','park','tour','things to do','bored','fun','something to do'], query:'things to do', label:'Things to do' },
-    { key:'travel', keys:['hotel','stay','flight','trip','vacation','weekend','getaway'], query:'travel experiences', label:'Travel' },
-    { key:'shopping', keys:['shop','shopping','gift','store','boutique','present for'], query:'shopping', label:'Shopping' },
+    { key:'dining', keys:['restaurant','dinner','lunch','brunch','eat','food','cuisine','dining','coffee','cafe','café','bar','drinks','hungry','date night','breakfast','grub','bite','grab a bite','starving','takeout','take out','munchies','foodie'], query:'restaurants', label:'Dining' },
+    { key:'wellness', keys:['spa','massage','yoga','wellness','relax','meditation','gym','fitness','tired','stressed','stressed out','need to unwind','recharge','beat','exhausted','burnt out','burned out','knackered','wiped','zen','self care','self-care'], query:'spa and wellness', label:'Wellness' },
+    { key:'activities', keys:['museum','gallery','art','attraction','sightsee','activity','activities','park','tour','things to do','bored','fun','something to do','lit','turnt','chill spot','hang out','hangout','kill time','stuff to do'], query:'things to do', label:'Things to do' },
+    { key:'travel', keys:['hotel','stay','flight','trip','vacation','weekend','getaway','roadtrip','road trip'], query:'travel experiences', label:'Travel' },
+    { key:'shopping', keys:['shop','shopping','gift','store','boutique','present for','retail therapy'], query:'shopping', label:'Shopping' },
   ];
+  /* Classic edit-distance, so single typos/misspellings ("resturant",
+     "wether", "yog") still land on the right category instead of falling
+     through to the generic default reply. Kept to single words — multi-
+     word phrases ("date night", "things to do") still match by plain
+     substring below, which is already forgiving about phrasing. */
+  function levenshtein(a, b){
+    const m = a.length, n = b.length;
+    if(!m) return n; if(!n) return m;
+    const row = new Array(n + 1);
+    for(let j = 0; j <= n; j++) row[j] = j;
+    for(let i = 1; i <= m; i++){
+      let prev = row[0];
+      row[0] = i;
+      for(let j = 1; j <= n; j++){
+        const tmp = row[j];
+        row[j] = a[i-1] === b[j-1] ? prev : 1 + Math.min(prev, row[j], row[j-1]);
+        prev = tmp;
+      }
+    }
+    return row[n];
+  }
+  function fuzzyIncludes(lower, keyword){
+    if(lower.includes(keyword)) return true;
+    if(keyword.includes(' ')) return false; // phrases: substring above is enough
+    if(keyword.length < 4) return false; // too short to fuzzy-match without false positives
+    const tolerance = keyword.length >= 7 ? 2 : 1;
+    return lower.split(/[^a-z']+/).some(word => word.length >= 3 && levenshtein(word, keyword) <= tolerance);
+  }
   // When the message only names one category, round the reply out with one
   // real, live complementary category — a single thin list of restaurants
   // (say) doesn't feel like a robust concierge reply, but "dining + things
@@ -3315,11 +3600,13 @@
   const CHAT_CATEGORY_PAIRING = { dining:'activities', wellness:'dining', activities:'dining', travel:'activities', shopping:'dining' };
   const CHAT_WEATHER_KEYS = ['weather','temperature','forecast','how hot','how cold','degrees','rain','sunny'];
   const CHAT_GUIDE_KEYS = ["what's","what is","tell me about","know about","overview of","guide to","guide for"];
-  const CHAT_GREETING_RE = /^(hi|hello|hey|hiya|good morning|good afternoon|good evening)[\s!.,]*$/i;
+  const CHAT_GREETING_RE = /^(hi+|hello+|hey+|heyy+|yo|sup|hiya|howdy|good morning|good afternoon|good evening)[\s!.,]*$/i;
   // Short acknowledgments/continuations ("yes", "sounds good", "thanks")
   // get a warm, human reply instead of silently misfiring an unrelated
   // places search — a real assistant doesn't ignore what you just said.
-  const CHAT_ACK_RE = /^(thanks|thank you|thx|ty|ok|okay|k|kk|cool|great|nice|awesome|perfect|sounds good|sounds great|got it|good|yes|yep|yeah|sure|why not|sweet)[\s!.,]*$/i;
+  // Includes common slang/shorthand (thx, tysm, np, bet, fr) as well as
+  // typed-fast variants, not just formal phrasing.
+  const CHAT_ACK_RE = /^(thanks|thank you|thankyou|thx|tysm|ty|np|ok|okay|k|kk|cool|great|nice|awesome|perfect|sounds good|sounds great|got it|good|bet|fr|yes|yep|yeah|yea|ya|sure|why not|sweet)[\s!.,]*$/i;
   const CHAT_HELP_RE = /\b(help|what can you do|capabilities)\b/i;
 
   /* Pulls "in/for/near/around/about <Place>" out of a message.
@@ -3343,13 +3630,15 @@
     if(CHAT_GREETING_RE.test(text.trim())) return { type:'greeting' };
     if(CHAT_ACK_RE.test(text.trim())) return { type:'ack' };
     if(CHAT_HELP_RE.test(lower)) return { type:'help' };
-    if(CHAT_WEATHER_KEYS.some(k => lower.includes(k))) return { type:'weather', location, explicitLocation };
-    if(CHAT_GUIDE_KEYS.some(k => lower.includes(k))) return { type:'guide', location, explicitLocation };
+    if(CHAT_WEATHER_KEYS.some(k => fuzzyIncludes(lower, k))) return { type:'weather', location, explicitLocation };
+    if(CHAT_GUIDE_KEYS.some(k => fuzzyIncludes(lower, k))) return { type:'guide', location, explicitLocation };
 
     // Collect every category the message actually names (e.g. "dinner and
     // a show" matches both dining and things-to-do) rather than stopping
     // at the first match — a real concierge would answer the whole ask.
-    const matched = CHAT_CATEGORY_INTENTS.filter(cat => cat.keys.some(k => lower.includes(k)));
+    // fuzzyIncludes tolerates single typos/misspellings on single-word
+    // keywords ("resturant", "yog") without needing an LLM.
+    const matched = CHAT_CATEGORY_INTENTS.filter(cat => cat.keys.some(k => fuzzyIncludes(lower, k)));
     let categories;
     if(matched.length){
       categories = matched.slice();
@@ -3388,23 +3677,43 @@
         `Happy to keep going — just say the word.`,
         `Let me know if you want me to dig into anything else.`,
         `Glad that helped. What's next?`,
+        `Always here if you think of something else.`,
+        `Good deal. I'm around whenever you need me.`,
       ]) };
     }
     if(intent.type === 'help'){
-      return { text: `I can pull real, live results for things like "good restaurants in Austin", "weather in Lisbon", "what's New York like", or "spa day near me" — and I'll remember which city we're talking about, so you can just keep asking follow-ups. Tap any place I mention to see its full details and book it.` };
+      return { text: pick([
+        `I can pull real, live results for things like "good restaurants in Austin", "weather in Lisbon", "what's New York like", or "spa day near me" — and I'll remember which city we're talking about, so you can just keep asking follow-ups. Tap any place I mention to see its full details and book it.`,
+        `Ask me things like "dinner near me", "weather in Lisbon", or "tell me about Austin" — I'll pull real, live results and remember the city so follow-ups just work. Tap any place I mention for the full details.`,
+      ]) };
     }
     if(intent.type === 'weather'){
       const data = await apiGet('/butler/weather?location=' + encodeURIComponent(intent.location));
-      if(!data.live) return { text: `I don't have live weather for ${escapeHtml(intent.location)} right now — that source isn't connected.` };
+      if(!data.live) return { text: pick([
+        `I don't have live weather for ${escapeHtml(intent.location)} right now — that source isn't connected.`,
+        `No live weather connected for ${escapeHtml(intent.location)} at the moment, sorry.`,
+      ]) };
       state.chatContext.lastLocation = intent.location;
-      return { text: `Right now in ${escapeHtml(intent.location)}: <strong>${Math.round(data.tempF)}°F</strong>, ${escapeHtml(data.conditions || '')}.` };
+      const temp = Math.round(data.tempF);
+      const cond = escapeHtml(data.conditions || '');
+      return { text: pick([
+        `Right now in ${escapeHtml(intent.location)}: <strong>${temp}°F</strong>, ${cond}.`,
+        `${escapeHtml(intent.location)} is sitting at <strong>${temp}°F</strong> and ${cond} right now.`,
+        `Currently <strong>${temp}°F</strong> and ${cond} in ${escapeHtml(intent.location)}.`,
+      ]) };
     }
     if(intent.type === 'guide'){
       const data = await apiGet('/butler/destination-guide?location=' + encodeURIComponent(intent.location));
-      if(!data.live || !data.extract) return { text: `I don't have a live guide for ${escapeHtml(intent.location)} yet.` };
+      if(!data.live || !data.extract) return { text: pick([
+        `I don't have a live guide for ${escapeHtml(intent.location)} yet.`,
+        `No destination guide connected for ${escapeHtml(intent.location)} right now.`,
+      ]) };
       state.chatContext.lastLocation = intent.location;
       const short = data.extract.length > 320 ? data.extract.slice(0,320).trim() + '…' : data.extract;
-      return { text: `${escapeHtml(short)}${data.url ? ` <a href="${data.url}" target="_blank" rel="noopener">Read more ${icon('arrow')}</a>` : ''}` };
+      const opener = pick([
+        '', `Here's what I've got on ${escapeHtml(intent.location)}: `, `A bit about ${escapeHtml(intent.location)}: `,
+      ]);
+      return { text: `${opener}${escapeHtml(short)}${data.url ? ` <a href="${data.url}" target="_blank" rel="noopener">Read more ${icon('arrow')}</a>` : ''}` };
     }
     // 'places' — fetch every matched (plus complementary) category in
     // parallel and stitch the real, live results into one multi-category
@@ -3424,15 +3733,49 @@
       });
     if(!sections.length){
       const askedFor = intent.categories.map(c => c.label.toLowerCase()).join(' or ');
-      return { text: `I couldn't find live results for ${escapeHtml(askedFor)} in ${escapeHtml(intent.location)} right now.` };
+      return { text: pick([
+        `I couldn't find live results for ${escapeHtml(askedFor)} in ${escapeHtml(intent.location)} right now.`,
+        `Nothing live came back for ${escapeHtml(askedFor)} in ${escapeHtml(intent.location)} — want me to try a nearby city?`,
+      ]) };
+    }
+    // Genuine personalization, never invented: whether we're still on the
+    // same city as the last reply (real conversation state), and whether
+    // this city happens to be one of the visitor's own saved favorites
+    // (real profile data) — both true facts, not claims about filtering
+    // that didn't actually happen.
+    const continuingCity = !intent.explicitLocation && state.chatContext.lastLocation === intent.location;
+    const isFavorite = (state.profile.favoriteLocations||[]).some(loc => loc.toLowerCase() === intent.location.toLowerCase());
+    const firstName = (state.profile.name||'').split(' ')[0] || '';
+    let openerPool;
+    if(continuingCity){
+      openerPool = [
+        `Still in ${escapeHtml(intent.location)} — here's what's live right now:`,
+        `Sticking with ${escapeHtml(intent.location)}:`,
+        `More from ${escapeHtml(intent.location)}:`,
+      ];
+    } else if(isFavorite){
+      openerPool = [
+        `${escapeHtml(intent.location)} — one of your favorites. Here's what's live right now:`,
+        `Good choice, ${escapeHtml(intent.location)} always delivers. Here's what's live:`,
+      ];
+    } else {
+      openerPool = [
+        `Here's what's live in ${escapeHtml(intent.location)} right now:`,
+        firstName ? `${escapeHtml(firstName)}, here's what I found in ${escapeHtml(intent.location)}:` : `Here's what I found in ${escapeHtml(intent.location)}:`,
+        `Pulled these fresh from ${escapeHtml(intent.location)}:`,
+        `Good options in ${escapeHtml(intent.location)} right now:`,
+      ];
     }
     state.chatContext.lastLocation = intent.location;
     const closer = pick([
       `Tap a name for details, or just tell me which one and I'll book it.`,
       `Say the word and I'll get one of these booked for you.`,
       `Let me know which one stands out and I'll take it from there.`,
+      `Tap any of those for the full details.`,
+      `Want me to go ahead and request one of these?`,
+      `Happy to pull more if none of these are quite right.`,
     ]);
-    return { text: `${sections.join('<br><br>')}<br><br>${closer}` };
+    return { text: `${pick(openerPool)}<br><br>${sections.join('<br><br>')}<br><br>${closer}` };
   }
 
   /* One shared conversation (state.messages) drives both the Messages
