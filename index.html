@@ -3168,7 +3168,16 @@
      and the Home/Calendar teasers. */
   async function loadCityEvents(location){
     const loc = location || currentLocation();
-    state.cityEvents = Object.assign({}, state.cityEvents, { loading: true, location: loc });
+    // Real bug found live: this used to keep the PREVIOUS city's real
+    // events in state.cityEvents.items while the new city's fetch was in
+    // flight (Object.assign only touched loading/location), so switching
+    // cities looked "stuck" showing stale results instead of the honest
+    // loading state — and if the new city genuinely has zero events, the
+    // old city's events kept showing instead of the "no events found"
+    // message. Clearing items here as soon as a new fetch starts fixes
+    // both: the loading text now actually shows, and a truly-empty result
+    // correctly falls through to the honest empty state below.
+    state.cityEvents = { loading: true, items: [], live: false, location: loc, source: null };
     if(state.page === 'events' || state.page === 'home') renderPage();
     try{
       const data = await apiGet('/butler/events?location=' + encodeURIComponent(loc));
