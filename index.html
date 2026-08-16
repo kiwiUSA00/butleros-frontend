@@ -1004,6 +1004,7 @@
     ipLocation: { city: null, lat: null, lon: null, loading: false, resolved: false }, // real city + coordinates detected from the visitor's own IP address — see detectIpLocation()
     detailProducts: { loading: false, items: [], live: false }, // real "Complete the Experience" product matches for the open detail item — see loadRelatedProducts()
     myEvents: { loading: false, items: [], live: false, loadedOnce: false }, // real events from the connected Eventbrite organization — see loadMyEvents()
+    cityEvents: { loading: false, items: [], live: false, location: null }, // real public events for a city via Ticketmaster — see loadCityEvents()
   };
   let spotlightTimer = null; // rotation interval handle — module-level since it's not render state
 
@@ -1102,6 +1103,7 @@
     if(page === 'travel') loadDestinationGuide();
     if(page === 'journal') loadJournal();
     if(page === 'events' && !state.myEvents.loadedOnce) loadMyEvents();
+    if(page === 'events' && !state.cityEvents.location) loadCityEvents(currentLocation());
     if(CATEGORY_FILTERS[page]) loadCategoryPlaces(page);
     if(page === 'home') loadHomeSpotlight(); else stopSpotlightRotation();
   }
@@ -1524,16 +1526,16 @@
      "not connected" notice for an optional integration; the full honest
      empty state lives on the dedicated Events page instead. */
   function homeEventsPanel(){
-    const ev = state.myEvents;
-    if(!ev.items.length) return '';
+    const ce = state.cityEvents;
+    if(!ce.items.length) return '';
     return `
       <section class="section">
         <div class="section-head">
-          <span class="label">Upcoming Events</span>
+          <span class="label">Happening in ${ce.location || currentLocation()}</span>
           <button class="view-all" data-nav="events">View all ${icon('arrow')}</button>
         </div>
         <div class="panel">
-          ${ev.items.slice(0,3).map(e => `
+          ${ce.items.slice(0,3).map(e => `
             <div class="mini-event-row">
               <div class="mini-event-thumb" style="${e.imageUrl ? `background-image:url('${e.imageUrl}');` : ''}"></div>
               <div>
@@ -2057,11 +2059,13 @@
   }
 
   /* ============ EVENTS ============
-     Real events from the connected Eventbrite organization (see
-     eventbriteClient in the backend) — a private-token, server-side
-     integration, so this shows *your own* organized/ticketed events, not a
-     general "things happening nearby" feed. Genuinely empty (never
-     fabricated) until an EVENTBRITE_KEY is configured on the backend. */
+     Two distinct, honest sources, never blended into one fabricated feed:
+     1) Ticketmaster (real public "what's happening in this city" search,
+        any city, instant self-serve key — see ticketmasterClient) — the
+        primary section, since that's genuine event discovery.
+     2) Eventbrite (real, but org-scoped only — a private-token integration
+        that shows *your own* organized/ticketed events, not public
+        listings — see eventbriteClient). Kept as a secondary section. */
   function eventDateLabel(iso){
     if(!iso) return 'Date TBA';
     const d = new Date(iso);
@@ -2069,33 +2073,52 @@
     return d.toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' }) + ' · ' + d.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
   }
 
+  function eventCard(e){
+    return `
+      <article class="event-card">
+        <div class="event-thumb" style="${e.imageUrl ? `background-image:url('${e.imageUrl}');` : ''}"></div>
+        <div class="event-body">
+          <div class="event-date">${eventDateLabel(e.start)}${e.segment ? ` · ${e.segment}` : ''}</div>
+          <h3>${e.title}</h3>
+          <div class="event-venue">${icon('compass')} ${e.venueName || e.address || 'Venue TBA'}</div>
+          ${e.description ? `<p class="event-desc">${e.description.length > 160 ? e.description.slice(0,160).trim() + '…' : e.description}</p>` : ''}
+          ${e.url ? `<a class="btn-ghost" href="${e.url}" target="_blank" rel="noopener">${icon('ticket')} Get Tickets</a>` : ''}
+        </div>
+      </article>
+    `;
+  }
+
   function pageEvents(){
+    const ce = state.cityEvents;
     const ev = state.myEvents;
+    const city = ce.location || currentLocation();
     return `
       <div class="page-head">
         <div class="eyebrow">Happenings</div>
         <h2>Events</h2>
-        <p>Real events from your connected Eventbrite organization.
-        ${ev.live ? `<span class="conn-pill live" style="margin-left:4px;">Live · Eventbrite</span>` : `<span class="conn-pill demo" style="margin-left:4px;">Not connected</span>`}</p>
+        <p>Real public events, searched live by city.
+        ${ce.live ? `<span class="conn-pill live" style="margin-left:4px;">Live · Ticketmaster</span>` : `<span class="conn-pill demo" style="margin-left:4px;">Not connected</span>`}</p>
       </div>
-      ${ev.loading && !ev.items.length ? `<div class="loading-state">Pulling your events...</div>` : ''}
-      ${!ev.loading && ev.loadedOnce && !ev.live ? `<div class="empty-state">No Eventbrite account connected yet — add an EVENTBRITE_KEY (a private token from Eventbrite's Account Settings → Developer Links → API Keys) to see your organization's real events here.</div>` : ''}
-      ${!ev.loading && ev.live && !ev.items.length ? `<div class="empty-state">Connected, but no events found on your Eventbrite organization right now.</div>` : ''}
-      ${ev.items.length ? `
-        <div class="events-grid">
-          ${ev.items.map(e => `
-            <article class="event-card">
-              <div class="event-thumb" style="${e.imageUrl ? `background-image:url('${e.imageUrl}');` : ''}"></div>
-              <div class="event-body">
-                <div class="event-date">${eventDateLabel(e.start)}</div>
-                <h3>${e.title}</h3>
-                <div class="event-venue">${icon('compass')} ${e.venueName || e.address || 'Venue TBA'}</div>
-                ${e.description ? `<p class="event-desc">${e.description.length > 160 ? e.description.slice(0,160).trim() + '…' : e.description}</p>` : ''}
-                ${e.url ? `<a class="btn-ghost" href="${e.url}" target="_blank" rel="noopener">${icon('ticket')} Get Tickets</a>` : ''}
-              </div>
-            </article>
-          `).join('')}
+
+      <div class="location-switcher" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px;">
+        <input id="eventsLocationInput" type="text" placeholder="Browse events in a city..." value="${city}" style="flex:1;min-width:160px;max-width:280px;padding:9px 14px;border:1px solid var(--line);border-radius:999px;font-size:13.5px;font-family:inherit;" />
+        <button class="btn-ghost" id="eventsLocationBtn" style="padding:9px 16px;">Search</button>
+        <span style="font-size:12px;color:var(--muted-2);">Showing live results for <strong>${city}</strong></span>
+      </div>
+
+      ${ce.loading && !ce.items.length ? `<div class="loading-state">Finding events in ${city}...</div>` : ''}
+      ${!ce.loading && !ce.live ? `<div class="empty-state">Not connected yet — add a TICKETMASTER_KEY (a free, instant key from developer.ticketmaster.com) to search real public events by city.</div>` : ''}
+      ${!ce.loading && ce.live && !ce.items.length ? `<div class="empty-state">Connected, but no events found in ${city} right now — try another city above.</div>` : ''}
+      ${ce.items.length ? `<div class="events-grid">${ce.items.map(eventCard).join('')}</div>` : ''}
+
+      ${(ev.loadedOnce && ev.live) || ev.items.length ? `
+        <div class="section-head" style="margin-top:32px;">
+          <span class="label">Your Own Events</span>
+          <span class="conn-pill live" style="margin-left:8px;">Live · Eventbrite</span>
         </div>
+        ${ev.items.length
+          ? `<div class="events-grid">${ev.items.map(eventCard).join('')}</div>`
+          : `<div class="empty-state">Connected, but no events found on your Eventbrite organization right now.</div>`}
       ` : ''}
     `;
   }
@@ -2272,6 +2295,13 @@
 
     const addEventBtn = document.getElementById('addEventBtn');
     if(addEventBtn) addEventBtn.addEventListener('click', openEventModal);
+
+    const eventsLocationBtn = document.getElementById('eventsLocationBtn');
+    const eventsLocationInput = document.getElementById('eventsLocationInput');
+    if(eventsLocationBtn && eventsLocationInput){
+      eventsLocationBtn.addEventListener('click', () => loadCityEvents(eventsLocationInput.value.trim() || currentLocation()));
+      eventsLocationInput.addEventListener('keydown', e => { if(e.key === 'Enter') loadCityEvents(eventsLocationInput.value.trim() || currentLocation()); });
+    }
 
     const retryFinance = document.getElementById('retryFinance');
     if(retryFinance) retryFinance.addEventListener('click', () => loadFinance());
@@ -2462,6 +2492,26 @@
       if(data.live) state.live = true;
     }catch(err){
       state.myEvents = { loading: false, items: [], live: false, loadedOnce: true };
+    }
+    if(state.page === 'events' || state.page === 'home') renderPage();
+  }
+
+  /* Real, genuinely public "what's happening in this city" event search —
+     see ticketmasterClient/GET /butler/events on the backend. Unlike the
+     Eventbrite panel above (your own organization's events only),
+     Ticketmaster's Discovery API supports real search by any city, which
+     is what actually powers "browse events near me" on the Events page
+     and the Home/Calendar teasers. */
+  async function loadCityEvents(location){
+    const loc = location || currentLocation();
+    state.cityEvents = Object.assign({}, state.cityEvents, { loading: true, location: loc });
+    if(state.page === 'events' || state.page === 'home') renderPage();
+    try{
+      const data = await apiGet('/butler/events?location=' + encodeURIComponent(loc));
+      state.cityEvents = { loading: false, items: data.events || [], live: !!data.live, location: loc };
+      if(data.live) state.live = true;
+    }catch(err){
+      state.cityEvents = { loading: false, items: [], live: false, location: loc };
     }
     if(state.page === 'events' || state.page === 'home') renderPage();
   }
@@ -2721,6 +2771,7 @@
     loadWeather();
     if(state.page === 'travel') loadDestinationGuide();
     if(CATEGORY_FILTERS[state.page]) loadCategoryPlaces(state.page, { reset: true });
+    if(state.page === 'events') loadCityEvents(trimmed);
   }
 
   /* ============ USER PROFILE (live) ============ */
@@ -2965,7 +3016,7 @@
   // that reads currentLocation() fires, so weather/spotlight/etc. pick up
   // whichever the user actually has.
   Promise.all([ loadUser(), detectIpLocation() ]).then(() => {
-    Promise.allSettled([ loadCalendar(), loadButlerRun(), loadWeather(), loadHomeSpotlight(), loadMyEvents() ]).then(() => {
+    Promise.allSettled([ loadCalendar(), loadButlerRun(), loadWeather(), loadHomeSpotlight(), loadMyEvents(), loadCityEvents(currentLocation()) ]).then(() => {
       renderGreeting();
       if(['home','profile','calendar','events'].includes(state.page)) renderPage();
     });
