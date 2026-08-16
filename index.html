@@ -984,8 +984,12 @@
 
   /* ============ CURATED CARD ============ */
   function curatedCard(c){
+    const photoUrl = c.photoName ? `${API_BASE}/butler/photo?name=${encodeURIComponent(c.photoName)}&w=600` : (c.imageUrl || null);
+    const bg = photoUrl
+      ? `background-image:url('${photoUrl}');background-size:cover;background-position:center;background-color:${c.grad[1]};`
+      : `background:linear-gradient(160deg, ${c.grad[0]}, ${c.grad[1]})`;
     return `
-      <article class="curated-card" style="background:linear-gradient(160deg, ${c.grad[0]}, ${c.grad[1]})" data-open="${c.id}">
+      <article class="curated-card" style="${bg}" data-open="${c.id}">
         <span class="badge">${c.badge}</span>
         <div class="cc-content">
           <h4>${c.title}</h4>
@@ -1022,13 +1026,13 @@
   function buildLiveCurated(results){
     const cards = [];
     (results.travelResults||[]).forEach((t) => {
-      cards.push({ id:t.id, badge:'TRAVEL', title:t.title, sub:`$${t.price} · ${t.location}`, cta:'View Option', grad:gradFor(cards.length), nav:'travel', kindData:'travel', raw:t });
+      cards.push({ id:t.id, badge:'TRAVEL', title:t.title, sub:`$${t.price} · ${t.location}`, cta:'View Option', grad:gradFor(cards.length), nav:'travel', kindData:'travel', raw:t, photoName:null, imageUrl:null });
     });
     (results.experienceResults||[]).forEach((e) => {
-      cards.push({ id:e.id, badge:'EXPERIENCES', title:e.title, sub:e.description, cta:'Book Now', grad:gradFor(cards.length), nav:'lifestyle', kindData:'experience', raw:e });
+      cards.push({ id:e.id, badge:'EXPERIENCES', title:e.title, sub:e.description, cta:'Book Now', grad:gradFor(cards.length), nav:'lifestyle', kindData:'experience', raw:e, photoName:e.photoName||null, imageUrl:e.imageUrl||null });
     });
     (results.shoppingResults||[]).forEach((p) => {
-      cards.push({ id:p.id, badge:'LIFESTYLE', title:p.name, sub:`$${p.price} at ${p.retailer}`, cta:'View Item', grad:gradFor(cards.length), nav:'lifestyle', kindData:'shopping', raw:p });
+      cards.push({ id:p.id, badge:'LIFESTYLE', title:p.name, sub:`$${p.price} at ${p.retailer}`, cta:'View Item', grad:gradFor(cards.length), nav:'lifestyle', kindData:'shopping', raw:p, photoName:null, imageUrl:p.imageUrl||null });
     });
     return cards;
   }
@@ -1077,8 +1081,8 @@
     if(card.kindData === 'experience'){
       const booking = (raw.bookingOptions || [])[0];
       return {
-        kind:'curated-experience', title: raw.title || card.title, badgeLabel:'Experience', photoName:null, imageUrl:null,
-        rating:null, userRatingCount:null, description: raw.description || card.sub, address:null, locationLabel: raw.location || currentLocation(),
+        kind:'curated-experience', title: raw.title || card.title, badgeLabel:'Experience', photoName: raw.photoName || null, imageUrl: raw.imageUrl || null,
+        rating: raw.rating || null, userRatingCount: raw.userRatingCount || null, description: raw.description || card.sub, address: raw.address || null, locationLabel: raw.address || raw.location || currentLocation(),
         url: booking ? booking.url : null, sourceLabel: booking ? providerLabel(booking.provider) : 'BOS', price:null, currency:null,
       };
     }
