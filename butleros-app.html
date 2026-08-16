@@ -293,6 +293,20 @@
     align-items:flex-end;
     padding:22px;
   }
+
+  /* ---------- home "ask isabella" panel ---------- */
+  /* A real, continuing conversation right on the Home page (shares
+     state.messages with the Messages page) instead of a one-shot "make a
+     request" box that just fires a generic booking confirmation. */
+  .home-ask-panel{ background:var(--surface); border:1px solid var(--line); border-radius:20px; padding:20px 22px; margin-bottom:30px; }
+  .home-ask-label{ display:flex; align-items:center; gap:8px; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--gold); font-weight:600; margin-bottom:12px; }
+  .home-ask-label svg{ width:14px; height:14px; }
+  .home-ask-thread{ display:flex; flex-direction:column; gap:10px; max-height:240px; overflow-y:auto; margin-bottom:14px; padding-right:2px; }
+  .home-ask-hint{ color:var(--muted); font-size:13.5px; line-height:1.55; margin:2px 0; }
+  .home-ask-input-row{ display:flex; gap:10px; }
+  .home-ask-input-row input{ flex:1; border:1px solid var(--line); border-radius:999px; padding:12px 18px; font-size:13.5px; outline:none; font-family:'Inter', sans-serif; }
+  .home-ask-input-row input:focus{ border-color:var(--gold); }
+  .home-ask-more{ margin-top:10px; }
   .hero-art .float-card{
     background:rgba(255,255,255,0.88);
     backdrop-filter:blur(6px);
@@ -989,8 +1003,9 @@
     events: [],   // populated from /butler/calendar-events/:userId
     picks: [],    // no live source for editorial "picks" yet — stays empty until one exists
     requests: [],
-    messages: [], // chat history — see sendChat() (rule-based assistant, no LLM)
+    messages: [], // chat history — shared by the Home "Ask Isabella" panel and the Messages page, so it's genuinely one continuing conversation regardless of which page it's typed from — see sendChatFrom() (rule-based assistant, no LLM)
     chatPlaceIndex: {}, // id -> real place item, for chat replies' clickable highlighted names
+    chatContext: { lastLocation: null }, // remembers the last city actually discussed, so a follow-up like "what about coffee?" doesn't silently lose the thread
     unread: 0,
     requestSeq: 0,
     curatedLive: null,   // populated from /butler/run once available
@@ -1574,6 +1589,31 @@
     `;
   }
 
+  /* A real, continuing conversation on the Home page — shares
+     state.messages/parseChatIntent()/buildChatReply() with the Messages
+     page, so typing here is genuinely the same assistant, not a
+     disconnected box that just fires back a generic "I'll book that."
+     Only the most recent few turns show inline to stay compact; the full
+     history always lives on the Messages page. */
+  function homeAskPanel(){
+    const recent = state.messages.slice(-6);
+    return `
+      <div class="home-ask-panel">
+        <div class="home-ask-label">${icon('chat')} Ask Isabella</div>
+        <div class="home-ask-thread" id="homeAskThread">
+          ${recent.length
+            ? recent.map(m => chatBubbleHtml(m, { showTime:false })).join('')
+            : `<p class="home-ask-hint">Ask about restaurants, things to do, the weather, or tell Isabella what you need — she'll actually reply and remember what you're talking about.</p>`}
+        </div>
+        <div class="home-ask-input-row">
+          <input id="homeAskInput" type="text" placeholder="Message Isabella..." />
+          <button class="send-btn" id="homeAskSend">${icon('send')}</button>
+        </div>
+        ${state.messages.length > 6 ? `<button class="footer-link home-ask-more" data-nav="messages">See full conversation ${icon('arrow')}</button>` : ''}
+      </div>
+    `;
+  }
+
   function pageHome(){
     const curated = (state.curatedLive || []).slice(0,4);
     return `
@@ -1582,7 +1622,7 @@
           <div class="eyebrow">Today's Edition</div>
           <h1>The art of<br>living well.</h1>
           <p>Thoughtfully curated recommendations and seamless service for a life well-lived.</p>
-          <button class="btn-primary" id="heroRequestBtn">Make a Request ${icon('arrow')}</button>
+          <button class="btn-primary" id="heroRequestBtn">Send a Detailed Request ${icon('arrow')}</button>
         </div>
         <div class="hero-art"${heroArtImg() ? ` style="background-image:linear-gradient(155deg, rgba(239,217,184,0.18), rgba(140,108,78,0.55)), url('${heroArtImg()}');background-size:cover;background-position:center;"` : ''}>
           <div class="rings"></div>
@@ -1595,6 +1635,8 @@
           </div>
         </div>
       </section>
+
+      ${homeAskPanel()}
 
       ${spotlightCarousel()}
 
@@ -2434,6 +2476,12 @@
       chatSend.addEventListener('click', sendChat);
       chatInput.addEventListener('keydown', e => { if(e.key === 'Enter') sendChat(); });
     }
+    const homeAskSend = document.getElementById('homeAskSend');
+    const homeAskInput = document.getElementById('homeAskInput');
+    if(homeAskSend){
+      homeAskSend.addEventListener('click', () => sendChatFrom('homeAskInput'));
+      homeAskInput.addEventListener('keydown', e => { if(e.key === 'Enter') sendChatFrom('homeAskInput'); });
+    }
 
     const saveProfile = document.getElementById('saveProfile');
     if(saveProfile){
@@ -2982,11 +3030,11 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   }
   const CHAT_CATEGORY_INTENTS = [
-    { key:'dining', keys:['restaurant','dinner','lunch','brunch','eat','food','cuisine','dining','coffee','cafe','café','bar','drinks'], query:'restaurants', label:'Dining' },
-    { key:'wellness', keys:['spa','massage','yoga','wellness','relax','meditation','gym','fitness'], query:'spa and wellness', label:'Wellness' },
-    { key:'activities', keys:['museum','gallery','art','attraction','sightsee','activity','activities','park','tour','things to do'], query:'things to do', label:'Things to do' },
-    { key:'travel', keys:['hotel','stay','flight','trip','vacation','weekend'], query:'travel experiences', label:'Travel' },
-    { key:'shopping', keys:['shop','shopping','gift','store','boutique'], query:'shopping', label:'Shopping' },
+    { key:'dining', keys:['restaurant','dinner','lunch','brunch','eat','food','cuisine','dining','coffee','cafe','café','bar','drinks','hungry','date night','breakfast'], query:'restaurants', label:'Dining' },
+    { key:'wellness', keys:['spa','massage','yoga','wellness','relax','meditation','gym','fitness','tired','stressed','stressed out','need to unwind','recharge'], query:'spa and wellness', label:'Wellness' },
+    { key:'activities', keys:['museum','gallery','art','attraction','sightsee','activity','activities','park','tour','things to do','bored','fun','something to do'], query:'things to do', label:'Things to do' },
+    { key:'travel', keys:['hotel','stay','flight','trip','vacation','weekend','getaway'], query:'travel experiences', label:'Travel' },
+    { key:'shopping', keys:['shop','shopping','gift','store','boutique','present for'], query:'shopping', label:'Shopping' },
   ];
   // When the message only names one category, round the reply out with one
   // real, live complementary category — a single thin list of restaurants
@@ -2995,20 +3043,28 @@
   const CHAT_CATEGORY_PAIRING = { dining:'activities', wellness:'dining', activities:'dining', travel:'activities', shopping:'dining' };
   const CHAT_WEATHER_KEYS = ['weather','temperature','forecast','how hot','how cold','degrees','rain','sunny'];
   const CHAT_GUIDE_KEYS = ["what's","what is","tell me about","know about","overview of","guide to","guide for"];
-  const CHAT_GREETING_RE = /^(hi|hello|hey|thanks|thank you|ok|okay|cool|great|nice)[\s!.,]*$/i;
+  const CHAT_GREETING_RE = /^(hi|hello|hey|hiya|good morning|good afternoon|good evening)[\s!.,]*$/i;
+  // Short acknowledgments/continuations ("yes", "sounds good", "thanks")
+  // get a warm, human reply instead of silently misfiring an unrelated
+  // places search — a real assistant doesn't ignore what you just said.
+  const CHAT_ACK_RE = /^(thanks|thank you|thx|ty|ok|okay|k|kk|cool|great|nice|awesome|perfect|sounds good|sounds great|got it|good|yes|yep|yeah|sure|why not|sweet)[\s!.,]*$/i;
   const CHAT_HELP_RE = /\b(help|what can you do|capabilities)\b/i;
 
   /* Pulls "in/for/near/around <Place>" out of a message. Capitalized-word
      heuristic (no NLP available) — good enough for city names typed
-     naturally ("dinner in Austin", "weather in New York"). Falls back to
-     wherever BOS already thinks the visitor is. */
+     naturally ("dinner in Austin", "weather in New York"). If nothing's
+     named, prefers whatever city was actually discussed most recently in
+     this conversation (state.chatContext.lastLocation) over silently
+     jumping back to the visitor's own location — a real conversation
+     doesn't lose the thread just because a follow-up left the city out. */
   function parseChatIntent(text){
     const lower = text.toLowerCase();
     const locMatch = text.match(/\b(?:in|for|near|around)\s+([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})/);
-    const location = locMatch ? locMatch[1].trim() : currentLocation();
     const explicitLocation = !!locMatch;
+    const location = locMatch ? locMatch[1].trim() : (state.chatContext.lastLocation || currentLocation());
 
     if(CHAT_GREETING_RE.test(text.trim())) return { type:'greeting' };
+    if(CHAT_ACK_RE.test(text.trim())) return { type:'ack' };
     if(CHAT_HELP_RE.test(lower)) return { type:'help' };
     if(CHAT_WEATHER_KEYS.some(k => lower.includes(k))) return { type:'weather', location, explicitLocation };
     if(CHAT_GUIDE_KEYS.some(k => lower.includes(k))) return { type:'guide', location, explicitLocation };
@@ -3036,21 +3092,40 @@
     return { type:'places', categories, location, explicitLocation };
   }
 
+  // Small rotating phrase pools so replies don't read like the exact same
+  // template every time — still 100% rule-based/no LLM, just less robotic.
+  function pick(options){ return options[Math.floor(Math.random() * options.length)]; }
+
   async function buildChatReply(intent){
     if(intent.type === 'greeting'){
-      return { text: `Happy to help, ${escapeHtml((state.profile.name||'').split(' ')[0] || 'there')}. Ask me about restaurants, things to do, the weather, or a destination.` };
+      const firstName = (state.profile.name||'').split(' ')[0] || 'there';
+      return { text: pick([
+        `Hi ${escapeHtml(firstName)}. What can I help with — dinner, something to do, the weather somewhere, or a place you're curious about?`,
+        `Hey ${escapeHtml(firstName)}, good to see you. Ask me anything — restaurants, things to do, weather, a destination.`,
+        `Hello! Happy to help, ${escapeHtml(firstName)}. What are you in the mood for?`,
+      ]) };
+    }
+    if(intent.type === 'ack'){
+      return { text: pick([
+        `Anything else I can look into for you?`,
+        `Happy to keep going — just say the word.`,
+        `Let me know if you want me to dig into anything else.`,
+        `Glad that helped. What's next?`,
+      ]) };
     }
     if(intent.type === 'help'){
-      return { text: `I can pull real, live results for things like "good restaurants in Austin", "weather in Lisbon", "what's New York like", or "spa day near me". Tap any place I mention to see its full details and book it.` };
+      return { text: `I can pull real, live results for things like "good restaurants in Austin", "weather in Lisbon", "what's New York like", or "spa day near me" — and I'll remember which city we're talking about, so you can just keep asking follow-ups. Tap any place I mention to see its full details and book it.` };
     }
     if(intent.type === 'weather'){
       const data = await apiGet('/butler/weather?location=' + encodeURIComponent(intent.location));
       if(!data.live) return { text: `I don't have live weather for ${escapeHtml(intent.location)} right now — that source isn't connected.` };
+      state.chatContext.lastLocation = intent.location;
       return { text: `Right now in ${escapeHtml(intent.location)}: <strong>${Math.round(data.tempF)}°F</strong>, ${escapeHtml(data.conditions || '')}.` };
     }
     if(intent.type === 'guide'){
       const data = await apiGet('/butler/destination-guide?location=' + encodeURIComponent(intent.location));
       if(!data.live || !data.extract) return { text: `I don't have a live guide for ${escapeHtml(intent.location)} yet.` };
+      state.chatContext.lastLocation = intent.location;
       const short = data.extract.length > 320 ? data.extract.slice(0,320).trim() + '…' : data.extract;
       return { text: `${escapeHtml(short)}${data.url ? ` <a href="${data.url}" target="_blank" rel="noopener">Read more ${icon('arrow')}</a>` : ''}` };
     }
@@ -3074,11 +3149,24 @@
       const askedFor = intent.categories.map(c => c.label.toLowerCase()).join(' or ');
       return { text: `I couldn't find live results for ${escapeHtml(askedFor)} in ${escapeHtml(intent.location)} right now.` };
     }
-    return { text: `${sections.join('<br><br>')}<br><br>Tap a name for details, or ask me to book one.` };
+    state.chatContext.lastLocation = intent.location;
+    const closer = pick([
+      `Tap a name for details, or just tell me which one and I'll book it.`,
+      `Say the word and I'll get one of these booked for you.`,
+      `Let me know which one stands out and I'll take it from there.`,
+    ]);
+    return { text: `${sections.join('<br><br>')}<br><br>${closer}` };
   }
 
-  async function sendChat(){
-    const input = document.getElementById('chatInput');
+  /* One shared conversation (state.messages) drives both the Messages
+     page's full chat panel and the Home page's compact "Ask Isabella"
+     panel — sendChatFrom() reads whichever input actually triggered it,
+     so typing on Home genuinely continues the same conversation you'd see
+     on Messages, instead of Home being a disconnected one-shot request
+     box. */
+  async function sendChatFrom(inputId){
+    const input = document.getElementById(inputId);
+    if(!input) return;
     const text = input.value.trim();
     if(!text) return;
     const now = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
@@ -3099,19 +3187,40 @@
     if(idx !== -1) state.messages.splice(idx, 1, { from:'them', text: reply.text, time: now() });
     renderChatOnly();
   }
-  function renderChatOnly(){
-    const chatBox = document.getElementById('chatMessages');
-    if(!chatBox) return;
-    chatBox.innerHTML = state.messages.map(m => `
-      <div class="msg ${m.from==='me'?'me':'them'}${m.typing?' typing':''}">${m.text}<div class="msg-time">${m.time}</div></div>
-    `).join('');
-    chatBox.scrollTop = chatBox.scrollHeight;
-    chatBox.querySelectorAll('[data-chat-place]').forEach(el => {
+  function sendChat(){ return sendChatFrom('chatInput'); }
+
+  function chatBubbleHtml(m, opts){
+    opts = opts || {};
+    return `<div class="msg ${m.from==='me'?'me':'them'}${m.typing?' typing':''}">${m.text}${opts.showTime !== false ? `<div class="msg-time">${m.time}</div>` : ''}</div>`;
+  }
+  function wireChatPlaceLinks(container){
+    container.querySelectorAll('[data-chat-place]').forEach(el => {
       el.addEventListener('click', () => {
         const item = state.chatPlaceIndex[el.dataset.chatPlace];
         if(item) openDetail(normalizePlaceDetail(item));
       });
     });
+  }
+  // Updates every live conversation surface currently in the DOM — the
+  // Messages page's full thread and/or the Home page's compact one — in
+  // place, without a full page re-render, so whichever input the visitor
+  // is actively typing in never loses focus mid-conversation.
+  function renderChatOnly(){
+    const chatBox = document.getElementById('chatMessages');
+    if(chatBox){
+      chatBox.innerHTML = state.messages.map(m => chatBubbleHtml(m)).join('');
+      chatBox.scrollTop = chatBox.scrollHeight;
+      wireChatPlaceLinks(chatBox);
+    }
+    const homeThread = document.getElementById('homeAskThread');
+    if(homeThread){
+      const recent = state.messages.slice(-6);
+      homeThread.innerHTML = recent.length
+        ? recent.map(m => chatBubbleHtml(m, { showTime:false })).join('')
+        : `<p class="home-ask-hint">Ask about restaurants, things to do, the weather, or tell Isabella what you need.</p>`;
+      homeThread.scrollTop = homeThread.scrollHeight;
+      wireChatPlaceLinks(homeThread);
+    }
   }
 
   /* ============ REQUEST MODAL ============ */
