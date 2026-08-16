@@ -1973,7 +1973,7 @@
   /* ============ HOME / CURATED (live) ============ */
   async function loadButlerRun(){
     try{
-      const results = await apiPost('/butler/run', { userId: USER_ID });
+      const results = await apiPost('/butler/run', { userId: USER_ID, location: currentLocation() });
       state.curatedLive = buildLiveCurated(results);
       state.live = true;
       if(['home','lifestyle','travel','dining','wellness'].includes(state.page)) renderPage();
@@ -2238,7 +2238,7 @@
     // header/hero "Make a Request" flow).
     if(state.page !== 'detail') navigate('requests');
 
-    apiPost('/butler/run', { userId: USER_ID })
+    apiPost('/butler/run', { userId: USER_ID, location: currentLocation() })
       .then(results => {
         req.status = 'confirmed';
         req.sub = results.summary || 'Confirmed a moment ago';
