@@ -626,6 +626,7 @@
   .chat-place-link{ font-weight:700; color:var(--gold); cursor:pointer; text-decoration:underline; text-decoration-color:transparent; transition:text-decoration-color .15s ease; }
   .chat-place-link:hover{ text-decoration-color:var(--gold); }
   .msg a{ color:inherit; font-weight:600; }
+  .msg svg{ width:12px; height:12px; vertical-align:-1px; display:inline-block; flex-shrink:0; }
   .typing{ display:flex; gap:4px; align-self:flex-start; padding:11px 15px; background:var(--cream); border-radius:16px; border-bottom-left-radius:4px; }
   .typing span{ width:5px; height:5px; border-radius:50%; background:var(--muted-2); animation:blink 1.2s infinite; }
   .typing span:nth-child(2){ animation-delay:0.2s; } .typing span:nth-child(3){ animation-delay:0.4s; }
@@ -2872,17 +2873,17 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   }
   const CHAT_CATEGORY_INTENTS = [
-    { keys:['restaurant','dinner','lunch','brunch','eat','food','cuisine','dining','coffee','cafe','café','bar','drinks'], query:'restaurants',
-      opener: loc => `For dining in ${escapeHtml(loc)}, I'd steer you toward` },
-    { keys:['spa','massage','yoga','wellness','relax','meditation','gym','fitness'], query:'spa and wellness',
-      opener: loc => `For unwinding in ${escapeHtml(loc)}, try` },
-    { keys:['museum','gallery','art','attraction','sightsee','activity','activities','park','tour','things to do'], query:'things to do',
-      opener: loc => `Worth doing in ${escapeHtml(loc)}:` },
-    { keys:['hotel','stay','flight','trip','vacation','weekend'], query:'travel experiences',
-      opener: loc => `Around ${escapeHtml(loc)}, consider` },
-    { keys:['shop','shopping','gift','store','boutique'], query:'shopping',
-      opener: loc => `For shopping in ${escapeHtml(loc)}, look at` },
+    { key:'dining', keys:['restaurant','dinner','lunch','brunch','eat','food','cuisine','dining','coffee','cafe','café','bar','drinks'], query:'restaurants', label:'Dining' },
+    { key:'wellness', keys:['spa','massage','yoga','wellness','relax','meditation','gym','fitness'], query:'spa and wellness', label:'Wellness' },
+    { key:'activities', keys:['museum','gallery','art','attraction','sightsee','activity','activities','park','tour','things to do'], query:'things to do', label:'Things to do' },
+    { key:'travel', keys:['hotel','stay','flight','trip','vacation','weekend'], query:'travel experiences', label:'Travel' },
+    { key:'shopping', keys:['shop','shopping','gift','store','boutique'], query:'shopping', label:'Shopping' },
   ];
+  // When the message only names one category, round the reply out with one
+  // real, live complementary category — a single thin list of restaurants
+  // (say) doesn't feel like a robust concierge reply, but "dining + things
+  // to do nearby" genuinely does. Still just real API data, never invented.
+  const CHAT_CATEGORY_PAIRING = { dining:'activities', wellness:'dining', activities:'dining', travel:'activities', shopping:'dining' };
   const CHAT_WEATHER_KEYS = ['weather','temperature','forecast','how hot','how cold','degrees','rain','sunny'];
   const CHAT_GUIDE_KEYS = ["what's","what is","tell me about","know about","overview of","guide to","guide for"];
   const CHAT_GREETING_RE = /^(hi|hello|hey|thanks|thank you|ok|okay|cool|great|nice)[\s!.,]*$/i;
@@ -2902,12 +2903,28 @@
     if(CHAT_HELP_RE.test(lower)) return { type:'help' };
     if(CHAT_WEATHER_KEYS.some(k => lower.includes(k))) return { type:'weather', location, explicitLocation };
     if(CHAT_GUIDE_KEYS.some(k => lower.includes(k))) return { type:'guide', location, explicitLocation };
-    for(const cat of CHAT_CATEGORY_INTENTS){
-      if(cat.keys.some(k => lower.includes(k))) return { type:'places', query:cat.query, opener:cat.opener, location, explicitLocation };
+
+    // Collect every category the message actually names (e.g. "dinner and
+    // a show" matches both dining and things-to-do) rather than stopping
+    // at the first match — a real concierge would answer the whole ask.
+    const matched = CHAT_CATEGORY_INTENTS.filter(cat => cat.keys.some(k => lower.includes(k)));
+    let categories;
+    if(matched.length){
+      categories = matched.slice();
+      if(categories.length === 1){
+        const extraKey = CHAT_CATEGORY_PAIRING[categories[0].key];
+        const extra = CHAT_CATEGORY_INTENTS.find(c => c.key === extraKey);
+        if(extra) categories.push(extra);
+      }
+    } else {
+      // No specific category recognized — still genuinely useful: lead with
+      // real things to do plus real dining, wherever the visitor is.
+      categories = [
+        CHAT_CATEGORY_INTENTS.find(c => c.key === 'activities'),
+        CHAT_CATEGORY_INTENTS.find(c => c.key === 'dining'),
+      ];
     }
-    // No specific category recognized — still genuinely useful: surface
-    // real things to do wherever the visitor is (or the city they named).
-    return { type:'places', query:'things to do', opener: loc => `Worth doing in ${escapeHtml(loc)}:`, location, explicitLocation };
+    return { type:'places', categories, location, explicitLocation };
   }
 
   async function buildChatReply(intent){
@@ -2928,16 +2945,27 @@
       const short = data.extract.length > 320 ? data.extract.slice(0,320).trim() + '…' : data.extract;
       return { text: `${escapeHtml(short)}${data.url ? ` <a href="${data.url}" target="_blank" rel="noopener">Read more ${icon('arrow')}</a>` : ''}` };
     }
-    // 'places'
-    const data = await apiGet(placesUrl(intent.query, intent.location));
-    if(!data.live || !(data.items||[]).length){
-      return { text: `I couldn't find live results for ${escapeHtml(intent.query)} in ${escapeHtml(intent.location)} right now.` };
+    // 'places' — fetch every matched (plus complementary) category in
+    // parallel and stitch the real, live results into one multi-category
+    // reply, so a single question surfaces more than one thin list. Any
+    // category that comes back empty/not-live is silently dropped rather
+    // than cluttering the reply — the visible sections are always genuine.
+    const results = await Promise.all(intent.categories.map(async cat => ({
+      cat, data: await apiGet(placesUrl(cat.query, intent.location)),
+    })));
+    const sections = results
+      .filter(r => r.data.live && (r.data.items||[]).length)
+      .map(r => {
+        const top = r.data.items.slice().sort((a,b) => (b.rating||0)-(a.rating||0)).slice(0,3);
+        top.forEach(p => { state.chatPlaceIndex[p.id] = p; });
+        const links = top.map(p => `<span class="chat-place-link" data-chat-place="${p.id}">${escapeHtml(p.title)}</span>${p.rating ? ` (${p.rating.toFixed(1)}★)` : ''}`).join(', ');
+        return `<strong>${escapeHtml(r.cat.label)} in ${escapeHtml(intent.location)}:</strong> ${links}`;
+      });
+    if(!sections.length){
+      const askedFor = intent.categories.map(c => c.label.toLowerCase()).join(' or ');
+      return { text: `I couldn't find live results for ${escapeHtml(askedFor)} in ${escapeHtml(intent.location)} right now.` };
     }
-    const top = data.items.slice().sort((a,b) => (b.rating||0)-(a.rating||0)).slice(0,3);
-    top.forEach(p => { state.chatPlaceIndex[p.id] = p; });
-    const links = top.map(p => `<span class="chat-place-link" data-chat-place="${p.id}">${escapeHtml(p.title)}</span>${p.rating ? ` (${p.rating.toFixed(1)}★)` : ''}`).join(', ');
-    const opener = intent.opener ? intent.opener(intent.location) : `In ${escapeHtml(intent.location)}, I'd suggest`;
-    return { text: `${opener} ${links}. Tap a name for details, or ask me to book one.` };
+    return { text: `${sections.join('<br><br>')}<br><br>Tap a name for details, or ask me to book one.` };
   }
 
   async function sendChat(){
