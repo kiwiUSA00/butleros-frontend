@@ -1749,8 +1749,11 @@
       return `
         <div class="home-ask-panel">
           <div class="home-ask-label">${icon('calendar')} Plan My Weekend</div>
-          <p class="home-ask-hint">Give Isabella a mood, a budget, and a city — she'll pull real experiences that actually match, live.</p>
-          <button class="btn-primary" id="openWeekendPlan">Plan My Weekend ${icon('arrow')}</button>
+          <p class="home-ask-hint">One tap — Isabella pulls a real weekend plan for ${escapeHtml(currentLocation())} instantly, live. Want to tune the mood, budget, or city first? Use Customize.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn-primary" id="openWeekendPlan">Plan My Weekend ${icon('arrow')}</button>
+            <button class="btn-ghost" id="customizeWeekendPlan">Customize</button>
+          </div>
         </div>
       `;
     }
@@ -1784,7 +1787,7 @@
                   <a class="btn-ghost" href="https://www.airbnb.com/s/${encodeURIComponent(wp.location)}/homes" target="_blank" rel="noopener">${icon('sparkle')} Search Airbnb</a>
                 </div>
               </div>`}
-          <button class="footer-link" id="replanWeekend" style="margin-top:16px;">Plan a different weekend ${icon('arrow')}</button>
+          <button class="footer-link" id="replanWeekend" style="margin-top:16px;">Customize this weekend ${icon('arrow')}</button>
         </div>
       `;
     }
@@ -1802,11 +1805,8 @@
       </div>
     `;
   }
-  async function submitWeekendPlan(){
-    const mood = (document.getElementById('wpMood').value || '').trim();
-    const budget = Number(document.getElementById('wpBudget').value) || 250;
-    const location = (document.getElementById('wpLocation').value || '').trim() || currentLocation();
-    state.weekendPlan = Object.assign({}, state.weekendPlan, { loading:true, mood, budget, location });
+  async function fetchWeekendPlan(mood, budget, location){
+    state.weekendPlan = Object.assign({}, state.weekendPlan, { open:true, loading:true, result:null, mood, budget, location });
     renderPage();
     try{
       const result = await apiPost('/butler/plan-weekend', { userId: USER_ID, mood, budget, location });
@@ -1816,6 +1816,22 @@
       state.weekendPlan = Object.assign({}, state.weekendPlan, { loading:false, result: { stays:[], experiences:[] } });
     }
     renderPage();
+  }
+  // "Plan My Weekend" now fetches instantly with sensible real defaults
+  // (the visitor's own saved mood/budget + wherever they're currently
+  // exploring) instead of making them fill in a form first — the form is
+  // still there, just moved behind the "Customize" button for anyone who
+  // wants to adjust before Isabella pulls results.
+  function planWeekendInstant(){
+    const mood = state.profile.mood || 'relaxed';
+    const budget = state.profile.budgetBand === 'high' ? 500 : state.profile.budgetBand === 'low' ? 100 : 250;
+    return fetchWeekendPlan(mood, budget, currentLocation());
+  }
+  async function submitWeekendPlan(){
+    const mood = (document.getElementById('wpMood').value || '').trim();
+    const budget = Number(document.getElementById('wpBudget').value) || 250;
+    const location = (document.getElementById('wpLocation').value || '').trim() || currentLocation();
+    return fetchWeekendPlan(mood, budget, location);
   }
 
   /* "Today's Edition" hero line — a genuine one-line summary of great
@@ -1846,7 +1862,7 @@
           <div class="eyebrow">Today's Edition</div>
           <h1>The art of<br>living well.</h1>
           <p>${todaysEditionSummary()}</p>
-          <button class="btn-primary" id="heroRequestBtn">Send a Detailed Request ${icon('arrow')}</button>
+          <button class="btn-primary" id="heroRequestBtn">Inspire Me ${icon('arrow')}</button>
         </div>
         <div class="hero-art"${heroArtImg() ? ` style="background-image:linear-gradient(155deg, rgba(239,217,184,0.18), rgba(140,108,78,0.55)), url('${heroArtImg()}');background-size:cover;background-position:center;"` : ''}>
           <div class="rings"></div>
@@ -2813,7 +2829,16 @@
     });
 
     const heroBtn = document.getElementById('heroRequestBtn');
-    if(heroBtn) heroBtn.addEventListener('click', () => openRequestModal());
+    // "Inspire Me" — takes you straight to a real, live list of things
+    // (Curated For You) instead of opening a blank "type your own request"
+    // form first. openRequestModal() is left in place/reachable elsewhere
+    // (e.g. the Requests page's own "Make a Request" button) for anyone who
+    // does want to type something specific.
+    if(heroBtn) heroBtn.addEventListener('click', () => {
+      const grid = document.getElementById('curatedGrid');
+      if(grid) grid.scrollIntoView({ behavior:'smooth', block:'start' });
+      else openRequestModal();
+    });
 
     const journalBtn = document.getElementById('journalBtn');
     if(journalBtn) journalBtn.addEventListener('click', () => navigate('journal'));
@@ -2946,9 +2971,15 @@
     }
 
     const openWeekendPlan = document.getElementById('openWeekendPlan');
-    if(openWeekendPlan){
-      openWeekendPlan.addEventListener('click', () => {
-        state.weekendPlan = Object.assign({}, state.weekendPlan, { open:true, result:null });
+    if(openWeekendPlan) openWeekendPlan.addEventListener('click', () => planWeekendInstant());
+    const customizeWeekendPlan = document.getElementById('customizeWeekendPlan');
+    if(customizeWeekendPlan){
+      customizeWeekendPlan.addEventListener('click', () => {
+        state.weekendPlan = Object.assign({}, state.weekendPlan, {
+          open:true, result:null, loading:false,
+          mood: state.weekendPlan.mood || state.profile.mood || '',
+          location: state.weekendPlan.location || currentLocation(),
+        });
         renderPage();
       });
     }
