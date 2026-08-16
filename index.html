@@ -908,10 +908,6 @@
     <div class="topbar">
       <button class="nav-toggle" id="navToggle" aria-label="Menu"></button>
       <div class="greeting" id="greeting"></div>
-      <div class="search-pill">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l1.8 4.9L19 9.5l-4.9 1.8L12 16l-1.8-4.9L5 9.5l4.9-1.8L12 3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
-        <input id="topSearch" type="text" placeholder="What can BOS arrange for you..." />
-      </div>
       <div class="profile-chip" id="profileChip">
         <div class="av" id="profileAv">A</div>
       </div>
@@ -1048,7 +1044,7 @@
     requests: [],
     messages: [], // chat history — shared by the Home "Ask Isabella" panel and the Messages page, so it's genuinely one continuing conversation regardless of which page it's typed from — see sendChatFrom() (rule-based assistant, no LLM)
     chatPlaceIndex: {}, // id -> real place item, for chat replies' clickable highlighted names
-    chatContext: { lastLocation: null }, // remembers the last city actually discussed, so a follow-up like "what about coffee?" doesn't silently lose the thread
+    chatContext: { lastLocation: null, lastPlaces: [] }, // remembers the last city actually discussed (so "what about coffee?" doesn't lose the thread) and the specific real places just shown, so "yeah let's do X" can be recognized as a confirmation instead of a fresh search
     weekendPlan: { open:false, loading:false, result:null, mood:'', budget:250, location:'' }, // real POST /butler/plan-weekend results — a whole backend capability that already existed but was never surfaced in the UI
     unread: 0,
     requestSeq: 0,
@@ -1105,7 +1101,9 @@
     { key:'wellness', label:'Wellness', icon:'heart' },
     // Finance temporarily pulled from the nav per request — pageFinance()
     // and its data loading are left intact so it's a one-line revert.
-    { key:'calendar', label:'Calendar', icon:'calendar' },
+    // Calendar temporarily pulled from the nav per request — pageCalendar()
+    // and its data loading are left intact so it's a one-line revert.
+    // { key:'calendar', label:'Calendar', icon:'calendar' },
     { key:'events', label:'Events', icon:'ticket' },
     // Requests temporarily pulled from the nav per request — pageRequests()
     // and submitRequest() are left intact so it's a one-line revert.
@@ -1207,7 +1205,9 @@
     const h = new Date().getHours();
     const g = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
     const pill = `<span class="conn-pill ${state.live?'live':'demo'}">${state.live?'Live':'Not connected'}</span>`;
-    const name = state.profile.name ? `, ${state.profile.name}` : '';
+    // Name temporarily dropped from the greeting per request — just "Good
+    // morning." for now. One-line revert: restore the ternary below.
+    const name = '';
     document.getElementById('greeting').innerHTML = `${icon('sun')}<span>${g}${name}.</span>${pill}`;
     document.getElementById('profileAv').textContent = state.profile.name ? state.profile.name[0] : '?';
   }
@@ -1818,6 +1818,26 @@
     renderPage();
   }
 
+  /* "Today's Edition" hero line — a genuine one-line summary of great
+     things to do/eat/see/experience right now, built from the same real,
+     live spotlight data (top-rated places across every category for the
+     current location) that powers the carousel below it. Falls back to
+     the original static line until the spotlight has actually loaded, so
+     nothing here is ever invented. */
+  const SPOTLIGHT_VERB = { dining:'eat at', wellness:'unwind at', travel:'explore', lifestyle:'see' };
+  function todaysEditionSummary(){
+    const s = state.homeSpotlight;
+    if(!s || !s.live || !s.items.length){
+      return 'Thoughtfully curated recommendations and seamless service for a life well-lived.';
+    }
+    const picks = s.items.slice(0, 3);
+    const parts = picks.map(p => `${SPOTLIGHT_VERB[p.categoryKey] || 'check out'} <strong>${escapeHtml(p.title)}</strong>`);
+    const joined = parts.length > 1
+      ? parts.slice(0, -1).join(', ') + (parts.length > 2 ? ',' : '') + ' and ' + parts[parts.length - 1]
+      : parts[0];
+    return `Today in ${escapeHtml(currentLocation())}: ${joined}.`;
+  }
+
   function pageHome(){
     const curated = (state.curatedLive || []).slice(0,4);
     return `
@@ -1825,7 +1845,7 @@
         <div class="hero-copy">
           <div class="eyebrow">Today's Edition</div>
           <h1>The art of<br>living well.</h1>
-          <p>Thoughtfully curated recommendations and seamless service for a life well-lived.</p>
+          <p>${todaysEditionSummary()}</p>
           <button class="btn-primary" id="heroRequestBtn">Send a Detailed Request ${icon('arrow')}</button>
         </div>
         <div class="hero-art"${heroArtImg() ? ` style="background-image:linear-gradient(155deg, rgba(239,217,184,0.18), rgba(140,108,78,0.55)), url('${heroArtImg()}');background-size:cover;background-position:center;"` : ''}>
@@ -1864,17 +1884,21 @@
       <section class="grid-bottom">
         <div class="panel">
           <div class="panel-head"><h3>Today at a Glance</h3></div>
-          ${state.events.slice(0,3).map(e => `
-            <div class="agenda-item">
-              <div class="agenda-icon">${icon('calendar')}</div>
-              <div>
-                <div class="agenda-time">${e.time}</div>
-                <div class="agenda-title">${e.title}</div>
-                <div class="agenda-sub">${e.sub}</div>
+          ${state.homeSpotlight && state.homeSpotlight.live && state.homeSpotlight.items.length
+            ? state.homeSpotlight.items.slice(0,3).map(p => `
+              <div class="agenda-item" data-glance-place="${p.id}" style="cursor:pointer;">
+                <div class="agenda-icon">${icon(p.categoryKey === 'dining' ? 'fork' : p.categoryKey === 'wellness' ? 'heart' : p.categoryKey === 'travel' ? 'plane' : 'compass')}</div>
+                <div>
+                  <div class="agenda-time">${SPOTLIGHT_CATEGORY_LABEL[p.categoryKey] || 'Today'}</div>
+                  <div class="agenda-title">${escapeHtml(p.title)}</div>
+                  <div class="agenda-sub">${p.rating ? `★ ${p.rating.toFixed(1)} · ` : ''}${escapeHtml(p.address || '')}</div>
+                </div>
               </div>
-            </div>
-          `).join('') || `<div class="empty-state">Nothing on the calendar yet.</div>`}
-          <button class="footer-link" data-nav="calendar">View Full Calendar ${icon('arrow')}</button>
+            `).join('')
+            : (state.homeSpotlight && state.homeSpotlight.loading
+              ? `<div class="loading-state">Finding today's live picks...</div>`
+              : `<div class="empty-state">Nothing live yet — check back in a moment.</div>`)}
+          <button class="footer-link" data-nav="lifestyle">See More Things To Do ${icon('arrow')}</button>
         </div>
 
         <div class="panel">
@@ -2355,23 +2379,10 @@
           `).join('')}
         </div>
       `).join('') : `<div class="empty-state">Nothing scheduled. Add an event above.</div>`}
-      ${state.myEvents.items.length ? `
-        <div class="panel" style="margin-top:22px;">
-          <div class="panel-head"><h3>Your Eventbrite Events</h3><span class="conn-pill live" style="margin-left:8px;">Live · Eventbrite</span></div>
-          ${state.myEvents.items.slice(0,5).map(e => `
-            <div class="mini-event-row">
-              <div class="mini-event-thumb" style="${e.imageUrl ? `background-image:url('${e.imageUrl}');` : ''}"></div>
-              <div style="flex:1;">
-                <div class="mini-event-title">${e.title}</div>
-                <div class="mini-event-meta">${eventDateLabel(e.start)}${e.venueName ? ` · ${e.venueName}` : ''}</div>
-              </div>
-              ${e.start ? `<button class="footer-link" data-add-to-cal="${e.id}" title="Add to your BOS calendar">${icon('plus')}</button>` : ''}
-            </div>
-          `).join('')}
-          <button class="footer-link" data-nav="events" style="margin-top:12px;">See All Events ${icon('arrow')}</button>
-        </div>
-      ` : ''}
     `;
+    // Eventbrite ("Your Eventbrite Events") removed from this page per
+    // request — state.myEvents/loadMyEvents() are left intact so this is a
+    // one-line revert if needed later.
   }
 
   function pageRequests(){
@@ -2609,17 +2620,11 @@
       ${!ce.loading && !ce.live ? `<div class="empty-state">Not connected yet — add a TICKETMASTER_KEY (free, instant, from developer.ticketmaster.com) and/or a SEATGEEK_CLIENT_ID (free, instant, from seatgeek.com/build) to search real public events by city.</div>` : ''}
       ${!ce.loading && ce.live && !ce.items.length ? `<div class="empty-state">Connected, but no events found in ${city} right now — try another city above.</div>` : ''}
       ${ce.items.length ? `<div class="events-grid">${ce.items.map(eventCard).join('')}</div>` : ''}
-
-      ${(ev.loadedOnce && ev.live) || ev.items.length ? `
-        <div class="section-head" style="margin-top:32px;">
-          <span class="label">Your Own Events</span>
-          <span class="conn-pill live" style="margin-left:8px;">Live · Eventbrite</span>
-        </div>
-        ${ev.items.length
-          ? `<div class="events-grid">${ev.items.map(eventCard).join('')}</div>`
-          : `<div class="empty-state">Connected, but no events found on your Eventbrite organization right now.</div>`}
-      ` : ''}
     `;
+    // Eventbrite ("Your Own Events") removed from this page per request —
+    // state.myEvents/loadMyEvents() are left intact so this is a one-line
+    // revert if needed later. `ev` is now unused here but left assigned
+    // above for that same reason.
   }
 
   function savedPlaceRow(s){
@@ -2800,6 +2805,12 @@
 
     root.querySelectorAll('[data-nav]').forEach(el => el.addEventListener('click', () => navigate(el.dataset.nav)));
     root.querySelectorAll('[data-pick]').forEach(el => el.addEventListener('click', () => toast('Saved to your reading list.')));
+    root.querySelectorAll('[data-glance-place]').forEach(el => {
+      el.addEventListener('click', () => {
+        const item = findPlaceItemById(el.dataset.glancePlace);
+        if(item) openDetail(normalizePlaceDetail(item));
+      });
+    });
 
     const heroBtn = document.getElementById('heroRequestBtn');
     if(heroBtn) heroBtn.addEventListener('click', () => openRequestModal());
@@ -2822,8 +2833,13 @@
     const eventsLocationBtn = document.getElementById('eventsLocationBtn');
     const eventsLocationInput = document.getElementById('eventsLocationInput');
     if(eventsLocationBtn && eventsLocationInput){
-      eventsLocationBtn.addEventListener('click', () => loadCityEvents(eventsLocationInput.value.trim() || currentLocation()));
-      eventsLocationInput.addEventListener('keydown', e => { if(e.key === 'Enter') loadCityEvents(eventsLocationInput.value.trim() || currentLocation()); });
+      // Routed through setExploreLocation (not a direct loadCityEvents call)
+      // so searching a city on the Events page also updates weather,
+      // Curated For You, and every other location-aware widget — a search
+      // here used to only affect the Events list, leaving the rest of the
+      // app still pointed at whatever city loaded first.
+      eventsLocationBtn.addEventListener('click', () => setExploreLocation(eventsLocationInput.value.trim() || currentLocation()));
+      eventsLocationInput.addEventListener('keydown', e => { if(e.key === 'Enter') setExploreLocation(eventsLocationInput.value.trim() || currentLocation()); });
     }
 
     const retryFinance = document.getElementById('retryFinance');
@@ -3522,6 +3538,12 @@
     state.categoryGroupsKey = {};
     renderPage();
     loadWeather();
+    // "Curated For You" (Home) and the live spotlight both need to be
+    // refreshed too — previously only weather/category data followed a
+    // location switch, so Curated For You silently kept showing whatever
+    // city loaded first (e.g. NYC on first visit) forever after.
+    loadButlerRun();
+    loadHomeSpotlight();
     if(state.page === 'travel') loadDestinationGuide();
     if(CATEGORY_FILTERS[state.page]){
       if((state.categoryViewMode[state.page] || 'groups') === 'focused') loadCategoryPlaces(state.page, { reset: true });
@@ -3598,9 +3620,22 @@
   function fuzzyIncludes(lower, keyword){
     if(lower.includes(keyword)) return true;
     if(keyword.includes(' ')) return false; // phrases: substring above is enough
-    if(keyword.length < 4) return false; // too short to fuzzy-match without false positives
+    // Live bug found: "eat" fuzzy-matched "beat" (wellness slang for
+    // tired) at edit-distance 1, so a plain dinner question ("wut should
+    // i eat rn") incorrectly pulled in an unrelated Wellness section.
+    // Short words collide too easily — keyword.length<4 was not a tight
+    // enough floor. Now: keywords under 5 letters (spa, gym, zen, beat,
+    // yoga...) require an exact match, and an input word must be both
+    // >=4 letters and within `tolerance` letters of the keyword's own
+    // length before distance is even checked, so short unrelated words
+    // can't slip through on a technicality.
+    if(keyword.length < 5) return false;
     const tolerance = keyword.length >= 7 ? 2 : 1;
-    return lower.split(/[^a-z']+/).some(word => word.length >= 3 && levenshtein(word, keyword) <= tolerance);
+    return lower.split(/[^a-z']+/).some(word => {
+      if(word.length < 4) return false;
+      if(Math.abs(word.length - keyword.length) > tolerance) return false;
+      return levenshtein(word, keyword) <= tolerance;
+    });
   }
   // When the message only names one category, round the reply out with one
   // real, live complementary category — a single thin list of restaurants
@@ -3617,6 +3652,38 @@
   // typed-fast variants, not just formal phrasing.
   const CHAT_ACK_RE = /^(thanks|thank you|thankyou|thx|tysm|ty|np|ok|okay|k|kk|cool|great|nice|awesome|perfect|sounds good|sounds great|got it|good|bet|fr|yes|yep|yeah|yea|ya|sure|why not|sweet)[\s!.,]*$/i;
   const CHAT_HELP_RE = /\b(help|what can you do|capabilities)\b/i;
+
+  // Real bug found live: after the bot listed places and asked "Want me to
+  // go ahead and request one of these?", replying "yeah lets do terrace
+  // restaurant" was silently ignored — the message fell through to a fresh,
+  // generic category search (matched on the word "restaurant") instead of
+  // being recognized as picking a specific place that was just shown. Fixed
+  // by matching the message against state.chatContext.lastPlaces — the real
+  // places named in the most recent 'places' reply — before any other
+  // intent is considered, plus supporting "the first one"/"second one"/
+  // "last one" as a positional reference into that same list.
+  const ORDINAL_INDEX = { first:0, '1st':0, second:1, '2nd':1, third:2, '3rd':2 };
+  function findMentionedPlaceIndex(lowerText){
+    const list = state.chatContext.lastPlaces || [];
+    if(!list.length) return -1;
+    for(const word of Object.keys(ORDINAL_INDEX)){
+      if(new RegExp(`\\b${word}\\b`).test(lowerText)){
+        const idx = ORDINAL_INDEX[word];
+        if(idx < list.length) return idx;
+      }
+    }
+    if(/\blast (one|option)\b/.test(lowerText)) return list.length - 1;
+    // Otherwise: does the message contain a distinctive word (>=4 letters)
+    // from one of the real place titles just shown? Pick whichever place
+    // matches the most words — real title, not invented.
+    let bestIdx = -1, bestScore = 0;
+    list.forEach((p, idx) => {
+      const words = p.title.toLowerCase().split(/[^a-z0-9']+/).filter(w => w.length >= 4);
+      const score = words.filter(w => lowerText.includes(w)).length;
+      if(score > bestScore){ bestScore = score; bestIdx = idx; }
+    });
+    return bestIdx;
+  }
 
   /* Pulls "in/for/near/around/about <Place>" out of a message.
      Capitalized-word heuristic (no NLP available) — good enough for city
@@ -3637,8 +3704,23 @@
     const location = locMatch ? locMatch[1].trim() : (state.chatContext.lastLocation || currentLocation());
 
     if(CHAT_GREETING_RE.test(text.trim())) return { type:'greeting' };
-    if(CHAT_ACK_RE.test(text.trim())) return { type:'ack' };
     if(CHAT_HELP_RE.test(lower)) return { type:'help' };
+
+    // Checked before the generic ack/category logic below: does this
+    // message confirm/select one of the real places just shown? A bare
+    // "yes"/"yeah" only counts when exactly one place was offered (no
+    // ambiguity); anything naming a specific place or position ("terrace
+    // restaurant", "the first one") counts regardless of how many were
+    // offered. See findMentionedPlaceIndex() above for why this exists.
+    const lastPlaces = state.chatContext.lastPlaces || [];
+    if(CHAT_ACK_RE.test(text.trim()) && lastPlaces.length === 1){
+      return { type:'confirm-place', place: lastPlaces[0] };
+    }
+    const mentionedIdx = findMentionedPlaceIndex(lower);
+    if(mentionedIdx >= 0){
+      return { type:'confirm-place', place: lastPlaces[mentionedIdx] };
+    }
+    if(CHAT_ACK_RE.test(text.trim())) return { type:'ack' };
     if(CHAT_WEATHER_KEYS.some(k => fuzzyIncludes(lower, k))) return { type:'weather', location, explicitLocation };
     if(CHAT_GUIDE_KEYS.some(k => fuzzyIncludes(lower, k))) return { type:'guide', location, explicitLocation };
 
@@ -3690,6 +3772,21 @@
         `Good deal. I'm around whenever you need me.`,
       ]) };
     }
+    if(intent.type === 'confirm-place'){
+      const item = intent.place && state.chatPlaceIndex[intent.place.id];
+      if(!item){
+        return { text: `I don't have that one handy anymore — want me to pull fresh options?` };
+      }
+      submitRequest(`Book: ${item.title}`, { stay:true });
+      // Clear it so a stray follow-up "yes" doesn't accidentally re-book
+      // the same place a second time.
+      state.chatContext.lastPlaces = [];
+      return { text: pick([
+        `On it — I've sent a request for ${escapeHtml(item.title)}. I'll update you here once it's confirmed.`,
+        `Done — request sent for ${escapeHtml(item.title)}. I'll keep you posted.`,
+        `Got it, ${escapeHtml(item.title)} it is. Isabella's on it now.`,
+      ]) };
+    }
     if(intent.type === 'help'){
       return { text: pick([
         `I can pull real, live results for things like "good restaurants in Austin", "weather in Lisbon", "what's New York like", or "spa day near me" — and I'll remember which city we're talking about, so you can just keep asking follow-ups. Tap any place I mention to see its full details and book it.`,
@@ -3732,11 +3829,12 @@
     const results = await Promise.all(intent.categories.map(async cat => ({
       cat, data: await apiGet(placesUrl(cat.query, intent.location)),
     })));
+    const lastPlacesList = [];
     const sections = results
       .filter(r => r.data.live && (r.data.items||[]).length)
       .map(r => {
         const top = r.data.items.slice().sort((a,b) => (b.rating||0)-(a.rating||0)).slice(0,3);
-        top.forEach(p => { state.chatPlaceIndex[p.id] = p; });
+        top.forEach(p => { state.chatPlaceIndex[p.id] = p; lastPlacesList.push(p); });
         const links = top.map(p => `<span class="chat-place-link" data-chat-place="${p.id}">${escapeHtml(p.title)}</span>${p.rating ? ` (${p.rating.toFixed(1)}★)` : ''}`).join(', ');
         return `<strong>${escapeHtml(r.cat.label)} in ${escapeHtml(intent.location)}:</strong> ${links}`;
       });
@@ -3747,6 +3845,10 @@
         `Nothing live came back for ${escapeHtml(askedFor)} in ${escapeHtml(intent.location)} — want me to try a nearby city?`,
       ]) };
     }
+    // Remembered so a follow-up like "yeah let's do X" or "the first one"
+    // can be recognized as picking one of these specific real places — see
+    // findMentionedPlaceIndex() and the 'confirm-place' intent above.
+    state.chatContext.lastPlaces = lastPlacesList;
     // Genuine personalization, never invented: whether we're still on the
     // same city as the last reply (real conversation state), and whether
     // this city happens to be one of the visitor's own saved favorites
@@ -3881,7 +3983,8 @@
      which fans out to travel/experience/shopping/finance integrations and
      returns a summary. That summary becomes the request's confirmation text.
      Falls back to a synthetic confirmation if the backend is unreachable. */
-  function submitRequest(text){
+  function submitRequest(text, opts){
+    opts = opts || {};
     state.requestSeq += 1;
     const req = { id: state.requestSeq, title: text, sub: 'Submitted just now', status: 'progress' };
     state.requests.unshift(req);
@@ -3889,8 +3992,12 @@
     // If this request came from the detail page's "Book Now" button, stay
     // put so its own booking timeline can track the request live — only
     // jump to the Requests page for requests made elsewhere (e.g. the
-    // header/hero "Make a Request" flow).
-    if(state.page !== 'detail') navigate('requests');
+    // header/hero "Make a Request" flow). opts.stay covers a third case:
+    // confirming a place from inside the chat (see buildChatReply's
+    // 'confirm-place' branch) — jumping away to Requests mid-conversation
+    // would be jarring, so that flow stays on Messages/Home and the
+    // request still tracks live in the background regardless.
+    if(state.page !== 'detail' && !opts.stay) navigate('requests');
 
     apiPost('/butler/run', { userId: USER_ID, location: currentLocation() })
       .then(results => {
@@ -3918,22 +4025,21 @@
   }
 
   /* ============ TOP SEARCH ============ */
-  // Genuinely conversational, everywhere in the app — typing here used to
-  // just fire the generic /butler/run booking cycle (a canned "on it"
-  // confirmation regardless of what was actually typed). Now it's the
-  // exact same real, context-aware assistant as Messages/the Home "Ask
-  // Isabella" panel: same shared conversation, same live results — just
-  // reachable from any page instead of only Home or Messages.
-  const topSearch = document.getElementById('topSearch');
-  topSearch.addEventListener('keydown', e => {
-    if(e.key === 'Enter'){
-      const text = topSearch.value.trim();
-      if(!text) return;
-      topSearch.value = '';
-      navigate('messages');
-      submitChatMessage(text);
-    }
-  });
+  // The topbar search pill was removed from the top of the Home page per
+  // request — the "Ask Isabella" panel already at the top of Home's own
+  // content covers the same conversational search, so this was redundant.
+  // The #topSearch element and its markup are gone; this block is left
+  // commented (rather than deleted) so it's a quick revert if wanted back.
+  // const topSearch = document.getElementById('topSearch');
+  // topSearch.addEventListener('keydown', e => {
+  //   if(e.key === 'Enter'){
+  //     const text = topSearch.value.trim();
+  //     if(!text) return;
+  //     topSearch.value = '';
+  //     navigate('messages');
+  //     submitChatMessage(text);
+  //   }
+  // });
 
   /* ============ MOBILE NAV TOGGLE ============ */
   document.getElementById('navToggle').innerHTML = icon('menu');
@@ -3964,7 +4070,10 @@
   // that reads currentLocation() fires, so weather/spotlight/etc. pick up
   // whichever the user actually has.
   Promise.all([ loadUser(), detectIpLocation() ]).then(() => {
-    Promise.allSettled([ loadCalendar(), loadButlerRun(), loadWeather(), loadHomeSpotlight(), loadMyEvents(), loadCityEvents(currentLocation()) ]).then(() => {
+    // loadMyEvents() (Eventbrite) no longer kicked off at bootstrap — the
+    // UI that showed it (Events page + Calendar page) was removed per
+    // request. loadMyEvents() itself is left intact for a one-line revert.
+    Promise.allSettled([ loadCalendar(), loadButlerRun(), loadWeather(), loadHomeSpotlight(), loadCityEvents(currentLocation()) ]).then(() => {
       renderGreeting();
       if(['home','profile','calendar','events'].includes(state.page)) renderPage();
     });
