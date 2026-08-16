@@ -1822,8 +1822,16 @@
   // exploring) instead of making them fill in a form first — the form is
   // still there, just moved behind the "Customize" button for anyone who
   // wants to adjust before Isabella pulls results.
+  // Real bug found live: clicking "Plan My Weekend" repeatedly always
+  // returned the same handful of places for a city — the backend now
+  // varies real results by mood (see MOOD_QUERY_MAP in experiences.ts),
+  // but a hardcoded 'relaxed' default here meant every instant click still
+  // asked for the exact same category. Sampling a random real mood each
+  // time (when the visitor hasn't set one on their profile) gives genuine
+  // variety across categories, not just a shuffled order within one.
+  const INSTANT_PLAN_MOODS = ['relaxed', 'adventurous', 'cultural', 'romantic', 'fun', 'food-focused'];
   function planWeekendInstant(){
-    const mood = state.profile.mood || 'relaxed';
+    const mood = state.profile.mood || INSTANT_PLAN_MOODS[Math.floor(Math.random() * INSTANT_PLAN_MOODS.length)];
     const budget = state.profile.budgetBand === 'high' ? 500 : state.profile.budgetBand === 'low' ? 100 : 250;
     return fetchWeekendPlan(mood, budget, currentLocation());
   }
