@@ -1273,6 +1273,15 @@
     bestbuy:'Best Buy', rakuten:'Rakuten', walmart:'Walmart', amazon:'Amazon',
   };
   function providerLabel(p){ return PROVIDER_LABELS[p] || p || 'BOS'; }
+  // /butler/events' `source` field is dynamic — "ticketmaster",
+  // "seatgeek", or "ticketmaster+seatgeek" depending on which real
+  // source(s) actually contributed this response, so the badge always
+  // names the genuine source rather than a hardcoded single provider.
+  const EVENT_SOURCE_LABELS = { ticketmaster: 'Ticketmaster', seatgeek: 'SeatGeek' };
+  function eventSourceLabel(source){
+    if(!source) return 'BOS';
+    return source.split('+').map(s => EVENT_SOURCE_LABELS[s] || s).join(' + ');
+  }
 
   /* ============ DETAIL PAGE (live) ============
      A single normalized shape every listing type gets mapped into before
@@ -2587,7 +2596,7 @@
         <div class="eyebrow">Happenings</div>
         <h2>Events</h2>
         <p>Real public events, searched live by city.
-        ${ce.live ? `<span class="conn-pill live" style="margin-left:4px;">Live · Ticketmaster</span>` : `<span class="conn-pill demo" style="margin-left:4px;">Not connected</span>`}</p>
+        ${ce.live ? `<span class="conn-pill live" style="margin-left:4px;">Live · ${eventSourceLabel(ce.source)}</span>` : `<span class="conn-pill demo" style="margin-left:4px;">Not connected</span>`}</p>
       </div>
 
       <div class="location-switcher" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px;">
@@ -3076,10 +3085,10 @@
     if(state.page === 'events' || state.page === 'home') renderPage();
     try{
       const data = await apiGet('/butler/events?location=' + encodeURIComponent(loc));
-      state.cityEvents = { loading: false, items: data.events || [], live: !!data.live, location: loc };
+      state.cityEvents = { loading: false, items: data.events || [], live: !!data.live, location: loc, source: data.source || null };
       if(data.live) state.live = true;
     }catch(err){
-      state.cityEvents = { loading: false, items: [], live: false, location: loc };
+      state.cityEvents = { loading: false, items: [], live: false, location: loc, source: null };
     }
     if(state.page === 'events' || state.page === 'home') renderPage();
   }
