@@ -2837,6 +2837,21 @@
         if(item) openDetail(normalizePlaceDetail(item));
       });
     });
+    // Real bug found live: Plan My Weekend's experience cards had no click
+    // handler at all — they looked like clickable cards but did nothing.
+    // These are ExperienceCard-shaped (from the same curateExperiences()
+    // backend function that powers the Home "Curated For You" experience
+    // cards), not raw Google Places items, and carry a freshly-generated
+    // id that findPlaceItemById() would never match — so they're looked up
+    // directly out of state.weekendPlan.result.experiences instead and run
+    // through the existing 'experience' branch of normalizeCuratedDetail().
+    root.querySelectorAll('[data-weekend-item]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.weekendItem;
+        const item = ((state.weekendPlan.result && state.weekendPlan.result.experiences) || []).find(e => e.id === id);
+        if(item) openDetail(normalizeCuratedDetail({ kindData:'experience', raw:item, title:item.title, sub:item.description }));
+      });
+    });
 
     const heroBtn = document.getElementById('heroRequestBtn');
     // "Inspire Me" — takes you straight to a real, live list of things
