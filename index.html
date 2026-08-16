@@ -1031,6 +1031,7 @@
     if(page === 'messages' && state.unread > 0){ state.unread = 0; }
     renderNav();
     renderPage();
+    window.scrollTo(0, 0);
     if(page === 'finance') loadFinance();
     if(page === 'travel') loadDestinationGuide();
     if(page === 'journal') loadJournal();
@@ -1195,6 +1196,7 @@
     stopSpotlightRotation();
     renderNav();
     renderPage();
+    window.scrollTo(0, 0);
     loadDetailMap();
     loadRelatedProducts();
   }
