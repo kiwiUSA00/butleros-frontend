@@ -1004,7 +1004,7 @@
     detailReturnPage: 'home', // where the Back button on the detail page goes
     detailMap: { loading: false, lat: null, lon: null, live: false }, // real coordinates for the embedded map, via /butler/geocode
     detailBookingRequestId: null, // set once "Book Now" is clicked on the detail page, so its timeline can track the real request's live status
-    ipLocation: { city: null, lat: null, lon: null, loading: false, resolved: false }, // real city + coordinates detected from the visitor's own IP address — see detectIpLocation()
+    ipLocation: { city: null, lat: null, lon: null, accuracy: null, source: null, loading: false, resolved: false }, // real city (via IP) + coordinates (IP, upgraded to real device GPS when granted) — see detectIpLocation()/detectPreciseLocation()
     detailProducts: { loading: false, items: [], live: false }, // real "Complete the Experience" product matches for the open detail item — see loadRelatedProducts()
     myEvents: { loading: false, items: [], live: false, loadedOnce: false }, // real events from the connected Eventbrite organization — see loadMyEvents()
     cityEvents: { loading: false, items: [], live: false, location: null }, // real public events for a city via Ticketmaster — see loadCityEvents()
@@ -1567,7 +1567,7 @@
           <div class="float-card">
             ${icon('sun')}
             <div>
-              <div class="t1">Right now in ${state.weather ? state.weather.location : 'your area'}${state.weather && state.weather.live ? ' <span class="conn-pill live" style="margin-left:4px;">Live</span>' : ''}</div>
+              <div class="t1">Right now in ${state.weather ? state.weather.location : 'your area'}${state.weather && state.weather.live ? ' <span class="conn-pill live" style="margin-left:4px;">Live</span>' : ''}${preciseLocationBadge(currentLocation())}</div>
               <div class="t2">${state.weather ? `${state.weather.tempF}°F, ${state.weather.conditions}` : 'Weather not connected yet'}</div>
             </div>
           </div>
@@ -1781,7 +1781,7 @@
       <div class="location-switcher" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px;">
         <input id="exploreLocationInput" type="text" placeholder="Explore a city..." value="${currentLocation()}" style="flex:1;min-width:160px;max-width:280px;padding:9px 14px;border:1px solid var(--line);border-radius:999px;font-size:13.5px;font-family:inherit;" />
         <button class="btn-ghost" id="exploreLocationBtn" style="padding:9px 16px;">Explore</button>
-        <span style="font-size:12px;color:var(--muted-2);">Showing live results for <strong>${currentLocation()}</strong></span>
+        <span style="font-size:12px;color:var(--muted-2);">Showing live results for <strong>${currentLocation()}</strong></span>${preciseLocationBadge(currentLocation())}
       </div>
     `;
   }
@@ -2575,13 +2575,26 @@
   /* Real coordinates to bias/rank Places results by actual distance —
      only when the location being searched IS where the visitor's IP says
      they really are (never applied to an explicitly-typed different city,
-     where "close to me" wouldn't make sense) and only ever the visitor's
-     own genuine IP-geolocated position (never estimated/fabricated). */
+     where "close to me" wouldn't make sense). These coordinates start as
+     IP-based (city/metro-level) and get quietly upgraded to real device
+     GPS the moment the visitor grants location permission — see
+     detectPreciseLocation() — never estimated/fabricated either way. */
   function precisionCoordsFor(location){
     if(state.ipLocation.city && location === state.ipLocation.city && state.ipLocation.lat != null && state.ipLocation.lon != null){
       return { lat: state.ipLocation.lat, lon: state.ipLocation.lon };
     }
     return null;
+  }
+  /* Honest label for whichever location source is actually active right
+     now — never claims GPS-level precision unless the visitor genuinely
+     granted it. Returns '' when there's nothing to show yet. */
+  function preciseLocationBadge(location){
+    if(!precisionCoordsFor(location)) return '';
+    if(state.ipLocation.source === 'gps'){
+      const acc = state.ipLocation.accuracy ? ` (±${Math.round(state.ipLocation.accuracy)}m)` : '';
+      return `<span class="conn-pill live" style="margin-left:6px;">Precise${acc}</span>`;
+    }
+    return `<span class="conn-pill demo" style="margin-left:6px;" title="Enable location access in your browser for street-level precision.">Approximate (IP)</span>`;
   }
   function placesUrl(query, location, extra){
     let url = '/butler/places?query=' + encodeURIComponent(query) + '&location=' + encodeURIComponent(location);
@@ -2595,7 +2608,13 @@
      falls back to ipwho.is if that fails. Both resolve the *visitor's*
      city from their own outbound IP address (this call happens in the
      browser, not our backend, specifically so it reflects the person
-     actually looking at the site rather than Render's server IP). */
+     actually looking at the site rather than Render's server IP).
+     IMPORTANT HONESTY NOTE: IP geolocation is only ever accurate to
+     roughly city/metro level — it resolves to the visitor's ISP's routing
+     infrastructure, not their literal position, and can be miles off from
+     where they actually are. It's the best available *fallback* with zero
+     permission prompts, but see detectPreciseLocation() below for the
+     real "close to me" fix — actual device GPS. */
   async function detectIpLocation(){
     // Runs in parallel with loadUser() at startup, so it doesn't know yet
     // whether a favorite location is set — that's fine, currentLocation()
@@ -2617,10 +2636,49 @@
         lat = data2 && typeof data2.latitude === 'number' ? data2.latitude : null;
         lon = data2 && typeof data2.longitude === 'number' ? data2.longitude : null;
       }
-      state.ipLocation = { city, lat, lon, loading: false, resolved: true };
+      // Never downgrade coordinates that already came from real device GPS
+      // (detectPreciseLocation() may resolve before or after this call).
+      const alreadyPrecise = state.ipLocation.source === 'gps';
+      state.ipLocation = Object.assign({}, state.ipLocation, {
+        city, loading: false, resolved: true,
+        lat: alreadyPrecise ? state.ipLocation.lat : lat,
+        lon: alreadyPrecise ? state.ipLocation.lon : lon,
+        source: alreadyPrecise ? 'gps' : 'ip',
+      });
     }catch(err){
-      state.ipLocation = { city: null, lat: null, lon: null, loading: false, resolved: true };
+      state.ipLocation = Object.assign({}, state.ipLocation, { loading: false, resolved: true });
     }
+  }
+
+  /* Real, genuinely precise device location via the browser's native
+     Geolocation API (GPS / Wi-Fi positioning, typically accurate to tens
+     of meters) — this is the actual fix for "close to me without having
+     to search," since IP geolocation above can only ever resolve to
+     city/metro level. Requires the visitor's explicit browser permission;
+     runs independently of the app's initial load (never blocks it) since
+     an unanswered permission prompt can sit indefinitely — if denied,
+     unsupported, or it times out, the app just keeps using the IP-based
+     approximate coordinates already in state.ipLocation. Resolves `true`
+     only when it genuinely upgraded to real GPS coordinates, so callers
+     know whether it's worth refreshing anything already on screen. */
+  function detectPreciseLocation(){
+    return new Promise((resolve) => {
+      if(!('geolocation' in navigator)){ resolve(false); return; }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          state.ipLocation = Object.assign({}, state.ipLocation, {
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            source: 'gps',
+            resolved: true,
+          });
+          resolve(true);
+        },
+        () => resolve(false), // denied, unavailable, or timed out — honest no-op, IP fallback stays in place
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 }
+      );
+    });
   }
 
   async function loadWeather(){
@@ -3023,6 +3081,21 @@
       renderGreeting();
       if(['home','profile','calendar','events'].includes(state.page)) renderPage();
     });
+  });
+
+  // Real device GPS is opt-in (browser permission prompt) and can sit
+  // unanswered indefinitely, so this runs independently rather than
+  // blocking the initial load above. If granted, it quietly upgrades
+  // state.ipLocation's coordinates from IP-level to genuinely precise GPS,
+  // then refreshes whatever's currently on screen that depends on "close
+  // to me" precision — the home spotlight, an open category page's
+  // results, or the ride-options panel on a detail page.
+  detectPreciseLocation().then((upgraded) => {
+    if(!upgraded) return;
+    renderGreeting();
+    if(state.page === 'home') loadHomeSpotlight();
+    if(CATEGORY_FILTERS[state.page]) loadCategoryPlaces(state.page, { reset: true });
+    if(state.page === 'detail') renderPage();
   });
 
 })();
